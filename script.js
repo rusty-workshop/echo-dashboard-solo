@@ -1985,7 +1985,10 @@ const SOUND_LIBRARY = [
   { id: "ocean", displayName: "Ocean Waves" },
   { id: "chime", displayName: "Chime" },
 ];
-const soundDisplayNameById = new Map(SOUND_LIBRARY.map((entry) => [entry.id, entry.displayName]));
+// Rebuilt whenever customSounds changes (see rebuildSoundDisplayNameMap()
+// further down) - starts as just the built-in library so every lookup
+// works before the custom-sounds IndexedDB load resolves.
+let soundDisplayNameById = new Map(SOUND_LIBRARY.map((entry) => [entry.id, entry.displayName]));
 
 const NOISE_BUFFER_SECONDS = 20;
 const SLEEP_TIMER_FADE_MS = 10_000;
@@ -2120,7 +2123,16 @@ function generateNoiseBuffer(soundId) {
 
 async function loadSoundBuffer(soundId) {
   if (bufferCache.has(soundId)) return bufferCache.get(soundId);
-  const buffer = generateNoiseBuffer(soundId);
+  const ctx = ensureAudioContext();
+  let buffer;
+  if (isCustomSoundId(soundId)) {
+    const record = await loadCustomSoundRecord(soundId);
+    if (!record) throw new Error(`Custom sound "${soundId}" no longer exists`);
+    const arrayBuffer = await record.blob.arrayBuffer();
+    buffer = await ctx.decodeAudioData(arrayBuffer);
+  } else {
+    buffer = generateNoiseBuffer(soundId);
+  }
   bufferCache.set(soundId, buffer);
   return buffer;
 }
@@ -2392,12 +2404,21 @@ function setupRecentSounds() {
   });
 }
 
-/** Fills every sound picker on the page from the local SOUND_LIBRARY -
- *  synchronous, no network involved anymore. */
+function soundOptionHtml(entry) {
+  return `<option value="${escapeHtml(entry.id)}">${escapeHtml(entry.displayName)}</option>`;
+}
+
+/** Fills every sound picker on the page from the local SOUND_LIBRARY plus
+ *  any imported custom sounds (see "Custom sounds" section below) - fully
+ *  synchronous, no network involved. Re-run after every import/delete, not
+ *  just once at startup. */
 function populateSoundPickers() {
-  const optionsHtml = SOUND_LIBRARY.map(
-    (entry) => `<option value="${escapeHtml(entry.id)}">${escapeHtml(entry.displayName)}</option>`
-  ).join("");
+  const builtInHtml = SOUND_LIBRARY.map(soundOptionHtml).join("");
+  const customHtml =
+    customSounds.length > 0
+      ? `<optgroup label="Custom">${customSounds.map(soundOptionHtml).join("")}</optgroup>`
+      : "";
+  const optionsHtml = builtInHtml + customHtml;
 
   ["sound-picker", "sound-picker-lg", "sound-picker-bedside"].forEach((id) => {
     const el = byId(id);
@@ -2411,6 +2432,201 @@ function populateSoundPickers() {
   const defaultAlarmSoundPicker = byId("wakealarm-default-sound-picker");
   if (defaultAlarmSoundPicker) defaultAlarmSoundPicker.innerHTML = optionsHtml;
   renderRecentSounds();
+}
+
+// ---------------------------------------------------------------------------
+// Custom sounds - real audio files you import yourself, stored locally in
+// IndexedDB (not localStorage - no practical size limit) and playable
+// anywhere a built-in sound is: the Sound Machine and Wake Alarms alike.
+// This is the actual answer to "can I use real sounds instead of
+// synthesized ones" - rather than this fork trying to source and bundle
+// audio of uncertain size/licensing, you bring your own, and it Just
+// Works everywhere the built-in library does (loadSoundBuffer() above
+// already branches on isCustomSoundId(), so nothing downstream needs to
+// know the difference between a custom sound and a generated one).
+// ---------------------------------------------------------------------------
+
+const CUSTOM_SOUNDS_DB_NAME = "aurora-dashboard-sounds";
+const CUSTOM_SOUNDS_STORE = "customSounds";
+const CUSTOM_SOUND_MAX_BYTES = 25 * 1024 * 1024; // generous for a multi-minute loop, still safe on modest hardware
+
+let customSounds = []; // [{id, displayName}] - metadata only; blobs stay in IndexedDB until actually played
+let customSoundsDbPromise = null;
+
+function openCustomSoundsDb() {
+  if (!window.indexedDB) return Promise.reject(new Error("IndexedDB not available"));
+  if (!customSoundsDbPromise) {
+    customSoundsDbPromise = new Promise((resolve, reject) => {
+      const request = indexedDB.open(CUSTOM_SOUNDS_DB_NAME, 1);
+      request.onupgradeneeded = () => {
+        request.result.createObjectStore(CUSTOM_SOUNDS_STORE, { keyPath: "id" });
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+  return customSoundsDbPromise;
+}
+
+function isCustomSoundId(id) {
+  return typeof id === "string" && id.startsWith("custom_");
+}
+
+async function saveCustomSoundRecord(id, displayName, blob) {
+  const db = await openCustomSoundsDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(CUSTOM_SOUNDS_STORE, "readwrite");
+    tx.objectStore(CUSTOM_SOUNDS_STORE).put({ id, displayName, blob });
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+/** Full record including the blob - only called from loadSoundBuffer()
+ *  right before actually decoding it, not for the Settings list (which
+ *  only needs displayName - see loadAllCustomSoundRecords() below). */
+async function loadCustomSoundRecord(id) {
+  const db = await openCustomSoundsDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(CUSTOM_SOUNDS_STORE, "readonly");
+    const request = tx.objectStore(CUSTOM_SOUNDS_STORE).get(id);
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function loadAllCustomSoundRecords() {
+  const db = await openCustomSoundsDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(CUSTOM_SOUNDS_STORE, "readonly");
+    const request = tx.objectStore(CUSTOM_SOUNDS_STORE).getAll();
+    request.onsuccess = () => resolve(request.result || []);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function deleteCustomSoundRecord(id) {
+  const db = await openCustomSoundsDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(CUSTOM_SOUNDS_STORE, "readwrite");
+    tx.objectStore(CUSTOM_SOUNDS_STORE).delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+function rebuildSoundDisplayNameMap() {
+  soundDisplayNameById = new Map([
+    ...SOUND_LIBRARY.map((entry) => [entry.id, entry.displayName]),
+    ...customSounds.map((entry) => [entry.id, entry.displayName]),
+  ]);
+}
+
+function renderCustomSoundsSettings() {
+  const list = byId("settings-customsounds-list");
+  if (!list) return;
+  if (customSounds.length === 0) {
+    list.innerHTML = '<div class="settings-app-empty">No custom sounds imported yet</div>';
+    return;
+  }
+  list.innerHTML = customSounds
+    .map(
+      (entry) => `<div class="settings-app-row" data-id="${escapeHtml(entry.id)}">
+        <span class="settings-app-label">${escapeHtml(entry.displayName)}</span>
+        <button class="icon-button customsound-remove" type="button" aria-label="Remove ${escapeHtml(entry.displayName)}">
+          <span class="icon-slot small" aria-hidden="true">${ICONS.close}</span>
+        </button>
+      </div>`
+    )
+    .join("");
+}
+
+function showCustomSoundImportHint(text) {
+  const hint = byId("customsound-import-hint");
+  if (!hint) return;
+  hint.textContent = text;
+  hint.classList.toggle("hidden", !text);
+}
+
+async function importCustomSoundFiles(fileList) {
+  const skipped = [];
+  for (const file of Array.from(fileList)) {
+    if (file.size > CUSTOM_SOUND_MAX_BYTES) {
+      skipped.push(file.name);
+      continue;
+    }
+    const id = `custom_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const displayName = file.name.replace(/\.[^.]+$/, "").slice(0, 40) || "Custom Sound";
+    try {
+      await saveCustomSoundRecord(id, displayName, file);
+      customSounds.push({ id, displayName });
+    } catch (err) {
+      skipped.push(file.name);
+    }
+  }
+
+  rebuildSoundDisplayNameMap();
+  populateSoundPickers();
+  renderCustomSoundsSettings();
+  renderSoundMachine();
+
+  showCustomSoundImportHint(
+    skipped.length > 0
+      ? `Skipped ${skipped.join(", ")} - over the 25 MB per-file limit, or couldn't be stored.`
+      : ""
+  );
+}
+
+async function setupCustomSounds() {
+  const importInput = byId("customsound-import-input");
+  const importLabel = byId("customsound-import-label");
+  if (!window.indexedDB) {
+    // Degrade gracefully rather than offering a control that can't work -
+    // same "hide, don't half-work" philosophy as the radar panel and
+    // Today in History card elsewhere in this file.
+    importLabel?.classList.add("hidden");
+    showCustomSoundImportHint("Custom sounds need IndexedDB, which this browser doesn't support.");
+    return;
+  }
+
+  try {
+    const records = await loadAllCustomSoundRecords();
+    customSounds = records.map((r) => ({ id: r.id, displayName: r.displayName }));
+  } catch (err) {
+    customSounds = [];
+  }
+  rebuildSoundDisplayNameMap();
+  populateSoundPickers();
+  renderCustomSoundsSettings();
+  renderSoundMachine();
+
+  importInput?.addEventListener("change", async (event) => {
+    const files = event.target.files;
+    if (files && files.length > 0) await importCustomSoundFiles(files);
+    event.target.value = ""; // lets the same filename be re-imported later
+  });
+
+  byId("settings-customsounds-list")?.addEventListener("click", async (event) => {
+    const removeBtn = event.target.closest(".customsound-remove");
+    if (!removeBtn) return;
+    const id = removeBtn.closest("[data-id]")?.dataset.id;
+    if (!id) return;
+
+    await deleteCustomSoundRecord(id);
+    customSounds = customSounds.filter((s) => s.id !== id);
+    bufferCache.delete(id);
+    rebuildSoundDisplayNameMap();
+    populateSoundPickers();
+    renderCustomSoundsSettings();
+
+    // A deleted sound that's currently playing has to actually stop -
+    // its buffer is gone, so any further reference to it would throw.
+    if (currentSoundId === id) {
+      stopLocalPlaybackFully();
+      saveSoundState();
+    }
+    renderSoundMachine();
+  });
 }
 
 /**
@@ -4094,6 +4310,7 @@ function init() {
   setupAmbientMode();
   setupSoundControls();
   restoreSoundStateFromStorage();
+  setupCustomSounds();
   setupWakeAlarmForm();
   setupWakeAlarmRingingControls();
   setupTimerPage();

@@ -73,6 +73,13 @@ over unchanged.
   API and looped gaplessly — no audio files bundled or fetched. Survives a
   reload (resumes whatever was playing, including an in-progress sleep
   timer) via `localStorage` instead of a remembered server-side state.
+- **Custom sounds**: import your own real audio files (Settings → Custom
+  Sounds) — stored locally in IndexedDB, no size practically limiting
+  them the way `localStorage` would, and no server involved. They show up
+  as options everywhere a built-in sound does, including as a Wake Alarm's
+  ringtone — this is the actual way to get real, non-synthesized audio
+  onto the dashboard, rather than this fork trying to source and bundle
+  audio of uncertain size and licensing.
 - **Bedside Mode**: one tap starts rain (optional — toggle "Play sound
   automatically" off in Settings for just the dimming/quiet clock), dims
   the display to a comfortable 50% (adjustable live via an on-screen

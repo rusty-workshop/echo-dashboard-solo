@@ -4009,6 +4009,28 @@ body.ambient-active .weather-bg {
   margin-bottom: 0.6em;
 }
 
+/* ---- Custom sounds ------------------------------------------------------
+   Real, user-imported audio (see the "Custom sounds" section in script.js) -
+   stored in IndexedDB, not proxied through anything. The actual <input
+   type="file"> stays hidden; its <label for="..."> wears the same
+   .settings-add-btn look every other "add" affordance on this page uses,
+   so tapping anywhere on the visible button opens the native file picker. */
+
+.settings-customsounds-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
+  margin-bottom: 0.6em;
+}
+
+.settings-file-label {
+  display: inline-block;
+}
+
+.settings-file-input {
+  display: none;
+}
+
 /* ---- Moon phase visual -----------------------------------------------
    A real rendered crescent/gibbous shape instead of just the emoji label
    (see renderMoonPhaseVisual() in script.js) - the classic two-
