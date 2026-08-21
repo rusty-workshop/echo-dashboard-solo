@@ -1,0 +1,786 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <!-- Fixed kiosk display: no pinch-zoom, no accidental double-tap zoom. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Aurora Dashboard Solo</title>
+  <script>
+    // Applied synchronously, before the stylesheet paints anything, so a
+    // saved theme choice never flashes the default look first.
+    (function () {
+      var theme = localStorage.getItem("echo-dashboard-theme");
+      if (theme && theme !== "default") document.documentElement.dataset.theme = theme;
+    })();
+  </script>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!--
+    A fork of echo-dashboard with every phone-dependent feature removed -
+    there is no companion app to pair with at all. Weather comes straight
+    from public APIs (see script.js's "Weather" section), Wake Alarms and
+    the Sound Machine are fully self-contained (Web Audio-synthesized
+    ambient loops instead of streamed files), and the Agenda is a manually-
+    kept list instead of a synced calendar. See script.js's header comment
+    for the full picture.
+
+    Six swipeable pages via CSS scroll-snap (no JS needed for the swipe
+    itself - the WebView's native touch scrolling handles it, which is
+    both simpler and smoother than a JS-driven carousel). script.js's
+    setupPager() just keeps the dot indicators in sync and lets a dot tap
+    jump to a page.
+
+    Several widgets (clock, weather, agenda, alarm, sound controls) appear
+    on two pages - the compact Morning Overview version and a bigger
+    dedicated-page version. Rather than a generic multi-target rendering
+    abstraction, the second instance of each just gets an id with an "-lg"
+    suffix, and the one render function per widget in script.js updates
+    both ids.
+  -->
+  <!-- Reading Mode's warm, dark overlay - dims and warms whichever page is
+       showing without taking it over the way Bedside/Ambient Mode do (see
+       setupReadingMode() in script.js). Sits above the weather effect but
+       pointer-events:none, so it's purely visual. -->
+  <div class="reading-mode-overlay hidden" id="reading-mode-overlay" aria-hidden="true"></div>
+  <div class="weather-bg" id="weather-bg" aria-hidden="true">
+    <div class="weather-moon-glow"></div>
+    <div class="weather-sun-glow"></div>
+    <div class="weather-sun-rays"></div>
+    <div class="weather-sun-flare"></div>
+    <div class="weather-cloud-ceiling"></div>
+    <div class="weather-cloud weather-cloud-a"></div>
+    <div class="weather-cloud weather-cloud-b"></div>
+    <div class="weather-cloud weather-cloud-c"></div>
+    <div class="weather-fog-wash"></div>
+    <div class="weather-fog-glow"></div>
+    <div class="weather-fog-band weather-fog-a"></div>
+    <div class="weather-fog-band weather-fog-b"></div>
+    <div class="weather-fog-band weather-fog-c"></div>
+    <div class="weather-fog-band weather-fog-d"></div>
+    <div class="weather-rain-trickle"></div>
+    <div class="weather-rain-layer weather-rain-far"></div>
+    <div class="weather-rain-layer weather-rain-near"></div>
+    <div class="weather-snow-layer weather-snow-far"></div>
+    <div class="weather-snow-layer weather-snow-mid"></div>
+    <div class="weather-snow-layer weather-snow-near"></div>
+    <div class="weather-bolt weather-bolt-a"></div>
+    <div class="weather-bolt weather-bolt-b"></div>
+    <div class="weather-flash"></div>
+    <div class="weather-stars weather-stars-a"></div>
+    <div class="weather-stars weather-stars-b"></div>
+    <div class="weather-stars weather-stars-c"></div>
+    <div class="weather-stars weather-stars-d"></div>
+    <div class="weather-stars weather-stars-e"></div>
+    <div class="weather-stars weather-stars-f"></div>
+    <div class="weather-shooting-star"></div>
+    <div class="weather-condensation"></div>
+  </div>
+  <div class="pager" id="pager">
+    <!-- Page 1: Morning Overview. -->
+    <section class="page page-overview" id="page-overview" aria-label="Morning Overview">
+      <div class="overview-banners">
+        <div class="severe-alert-banner hidden" id="severe-alert-banner" role="alert">
+          <span class="icon-slot small" id="severe-alert-icon" aria-hidden="true"></span>
+          <div class="severe-alert-text">
+            <div class="severe-alert-event" id="severe-alert-event"></div>
+            <div class="severe-alert-headline" id="severe-alert-headline"></div>
+          </div>
+          <button class="severe-alert-dismiss" id="severe-alert-dismiss" type="button" aria-label="Dismiss alert">&times;</button>
+        </div>
+        <div class="sticky-note-banner hidden" id="sticky-note-banner">
+          <span class="icon-slot small" id="sticky-note-icon" aria-hidden="true"></span>
+          <span class="sticky-note-text" id="sticky-note-text"></span>
+          <span class="sticky-note-count hidden" id="sticky-note-count"></span>
+          <button class="sticky-note-dismiss" id="sticky-note-dismiss" type="button" aria-label="Dismiss note">&times;</button>
+        </div>
+      </div>
+      <div class="sticky-note-editor-backdrop hidden" id="sticky-note-editor-backdrop"></div>
+      <div class="sticky-note-editor hidden" id="sticky-note-editor">
+        <div class="sticky-note-editor-header">
+          <span class="sticky-note-editor-title">Notes</span>
+          <button class="sticky-note-editor-close" id="sticky-note-editor-close" type="button" aria-label="Close">&times;</button>
+        </div>
+        <div class="sticky-note-add-row">
+          <input type="text" id="sticky-note-add-input" class="settings-text-input" placeholder="Add a note…" maxlength="80" autocomplete="off" aria-label="New note text" />
+          <button class="settings-add-btn" id="sticky-note-add-btn" type="button">Add</button>
+        </div>
+        <div class="sticky-note-list" id="sticky-note-list"></div>
+      </div>
+      <section class="hero-panel">
+        <div class="hero-panel-actions">
+          <button class="icon-button sticky-note-trigger-btn" id="sticky-note-trigger-btn" type="button" aria-label="Notes">
+            <span class="icon-slot" id="sticky-note-trigger-icon" aria-hidden="true"></span>
+          </button>
+          <button class="icon-button reading-mode-trigger-btn" id="reading-mode-trigger-btn" type="button" aria-label="Toggle Reading Mode" aria-pressed="false">
+            <span class="icon-slot" id="reading-mode-trigger-icon" aria-hidden="true"></span>
+          </button>
+          <button class="icon-button breathing-trigger-btn" id="breathing-trigger-btn" type="button" aria-label="Breathing exercise">
+            <span class="icon-slot" id="breathing-trigger-icon" aria-hidden="true"></span>
+          </button>
+          <button class="icon-button bedside-trigger-btn" id="bedside-trigger-btn" type="button" aria-label="Enter Bedside Mode">
+            <span class="icon-slot" id="bedside-trigger-icon" aria-hidden="true"></span>
+          </button>
+        </div>
+        <header class="clock-panel">
+          <div class="clock-time" id="clock-time" aria-live="off">--:--</div>
+          <div class="clock-date">
+            <span class="clock-weekday" id="clock-weekday">-</span>
+            <span class="clock-monthday" id="clock-monthday">-</span>
+          </div>
+        </header>
+
+        <div class="briefing" id="briefing">
+          <p class="briefing-greeting" id="briefing-greeting">Good morning.</p>
+          <p class="briefing-line" id="briefing-weather"></p>
+          <p class="briefing-line" id="briefing-summary"></p>
+          <p class="briefing-line briefing-quote" id="briefing-quote"></p>
+        </div>
+
+        <div class="status-line" id="status-line">
+          <span class="dot" aria-hidden="true"></span>
+          <span id="status-text"></span>
+        </div>
+      </section>
+
+      <!--
+        Cards below are direct children of .card-grid, not wrapped in
+        .card-row divs - script.js's applyTileLayout() builds the row
+        wrappers dynamically at runtime, grouping visible tiles two per
+        row in the order/sizes the Dashboard Layout setting stores. See
+        TILE_DOM_ID/TILE_SIZE_WEIGHT in script.js.
+      -->
+      <main class="card-grid">
+        <section class="card card-weather" id="card-weather" aria-label="Weather">
+          <h2 class="card-title">Weather</h2>
+          <div class="card-body">
+            <span class="icon-slot" id="weather-icon" aria-hidden="true"></span>
+            <div class="weather-readout">
+              <div class="weather-temp" id="weather-temp">--°</div>
+              <div class="weather-condition" id="weather-condition">No data</div>
+            </div>
+            <div class="weather-range">
+              <span>H <b id="weather-high">--°</b></span>
+              <span>L <b id="weather-low">--°</b></span>
+            </div>
+            <div class="weather-rain hidden" id="weather-rain">
+              <span class="icon-slot small" id="weather-rain-icon" aria-hidden="true"></span>
+              <span id="weather-rain-text"></span>
+            </div>
+          </div>
+        </section>
+
+        <section class="card card-schedule" id="card-schedule" aria-label="Agenda">
+          <h2 class="card-title">
+            <span class="icon-slot small" id="schedule-title-icon" aria-hidden="true"></span>
+            <span id="schedule-title-text">Today's Agenda</span>
+            <button class="notif-clear-btn" id="week-view-trigger-btn" type="button" aria-label="View the week">
+              <span class="icon-slot small" id="week-view-trigger-icon" aria-hidden="true"></span>
+            </button>
+          </h2>
+          <ul class="schedule-list" id="schedule-list">
+            <li class="schedule-empty">No events</li>
+          </ul>
+        </section>
+
+        <section class="card card-alarm" id="card-alarm" aria-label="Next Alarm">
+          <h2 class="card-title">
+            <span class="icon-slot small" id="alarm-title-icon" aria-hidden="true"></span>
+            Next Alarm
+          </h2>
+          <div class="card-body">
+            <div class="alarm-time" id="alarm-time">–</div>
+          </div>
+        </section>
+
+        <section class="card card-sound" id="card-sound" aria-label="Sound Machine">
+          <h2 class="card-title">Sound Machine</h2>
+          <div class="card-body">
+            <div class="sound-current">
+              <span class="icon-slot" id="sound-icon" aria-hidden="true"></span>
+              <span id="sound-name" class="sound-name">Off</span>
+              <div class="sound-controls">
+                <button class="icon-button" id="sound-play-pause" type="button" aria-label="Play">
+                  <span class="icon-slot" id="sound-play-pause-icon" aria-hidden="true"></span>
+                </button>
+                <button class="icon-button" id="sound-stop" type="button" aria-label="Stop">
+                  <span class="icon-slot" id="sound-stop-icon" aria-hidden="true"></span>
+                </button>
+              </div>
+            </div>
+
+            <div class="sound-row">
+              <button class="icon-button icon-button-small" id="sound-mute" type="button" aria-label="Mute">
+                <span class="icon-slot small" id="volume-icon" aria-hidden="true"></span>
+              </button>
+              <input type="range" id="sound-volume" class="sound-volume" min="0" max="100" value="50" aria-label="Volume" />
+              <span class="sound-volume-label" id="sound-volume-label">50%</span>
+            </div>
+
+            <div class="sound-row">
+              <select class="sound-select" id="sound-picker" aria-label="Choose sound"></select>
+              <select class="sound-select" id="timer-picker" aria-label="Sleep timer">
+                <option value="off">Timer: Off</option>
+                <option value="15">Timer: 15m</option>
+                <option value="30">Timer: 30m</option>
+                <option value="45">Timer: 45m</option>
+                <option value="60">Timer: 1h</option>
+                <option value="120">Timer: 2h</option>
+                <option value="untilAlarm">Timer: Alarm</option>
+              </select>
+            </div>
+          </div>
+        </section>
+
+        <section class="card card-worldclock" id="card-worldclock" aria-label="World Clock">
+          <h2 class="card-title">
+            <span class="icon-slot small" id="worldclock-title-icon" aria-hidden="true"></span>
+            World Clock
+          </h2>
+          <div class="worldclock-list" id="worldclock-list"></div>
+        </section>
+      </main>
+    </section>
+
+    <!-- Page 2: Daily Info - a bigger weather readout plus the full
+         agenda list. -->
+    <section class="page page-daily" id="page-daily" aria-label="Daily Info">
+      <div class="severe-alert-banner hidden" id="severe-alert-banner-lg" role="alert">
+        <span class="icon-slot small" id="severe-alert-icon-lg" aria-hidden="true"></span>
+        <div class="severe-alert-text">
+          <div class="severe-alert-event" id="severe-alert-event-lg"></div>
+          <div class="severe-alert-headline" id="severe-alert-headline-lg"></div>
+        </div>
+        <button class="severe-alert-dismiss" id="severe-alert-dismiss-lg" type="button" aria-label="Dismiss alert">&times;</button>
+      </div>
+      <div class="forecast-strip hidden" id="forecast-strip" aria-label="Daily forecast"></div>
+      <div class="page-body-split">
+        <div class="hero-tile">
+          <span class="icon-slot xlarge" id="weather-icon-lg" aria-hidden="true"></span>
+          <div class="hero-value" id="weather-temp-lg">--°</div>
+          <div class="hero-caption" id="weather-condition-lg">No data</div>
+          <div class="weather-range-lg">
+            <span>H <b id="weather-high-lg">--°</b></span>
+            <span>L <b id="weather-low-lg">--°</b></span>
+          </div>
+          <div class="weather-range-lg" id="weather-sun-lg">
+            <span>Sunrise <b id="weather-sunrise-lg">--:--</b></span>
+            <span>Sunset <b id="weather-sunset-lg">--:--</b></span>
+          </div>
+          <div class="weather-range-lg weather-moon-row">
+            <span class="moon-visual" id="moon-visual-daily" aria-hidden="true"></span>
+            <span id="weather-moon-label-lg"></span>
+          </div>
+          <div class="weather-rain-lg hidden" id="weather-rain-lg">
+            <span class="icon-slot small" id="weather-rain-icon-lg" aria-hidden="true"></span>
+            <span id="weather-rain-text-lg"></span>
+          </div>
+          <div class="weather-aqi-lg hidden" id="weather-aqi-lg">
+            <span class="icon-slot small" id="weather-aqi-icon-lg" aria-hidden="true"></span>
+            <span id="weather-aqi-text-lg"></span>
+          </div>
+          <div class="weather-details-lg hidden" id="weather-details-lg"></div>
+        </div>
+
+        <section class="panel panel-radar hidden" id="panel-radar" aria-label="Radar">
+          <h2 class="panel-title">
+            <span class="icon-slot small" id="radar-title-icon" aria-hidden="true"></span>
+            Radar
+          </h2>
+          <img class="radar-image" id="radar-image" alt="Weather radar loop" />
+        </section>
+
+        <section class="panel panel-schedule" aria-label="Agenda">
+          <h2 class="panel-title">
+            <span class="icon-slot small" id="schedule-title-icon-lg" aria-hidden="true"></span>
+            <span id="schedule-title-text-lg">Today's Agenda</span>
+          </h2>
+          <ul class="schedule-list schedule-list-lg" id="schedule-list-lg">
+            <li class="schedule-empty">No events</li>
+          </ul>
+        </section>
+
+        <section class="panel panel-history hidden" id="history-card" aria-label="Today in History">
+          <h2 class="panel-title">
+            <span class="icon-slot small" id="history-title-icon" aria-hidden="true"></span>
+            Today in History
+          </h2>
+          <ul class="history-list" id="history-list"></ul>
+        </section>
+      </div>
+    </section>
+
+    <!-- Page 3: Clock, Alarm, Sound Machine - the bedside-facing page.
+         Clock is the most prominent element on the whole dashboard here;
+         Alarm rides along as a small line right under the date; Sound
+         Machine gets a bigger version of the same controls from the
+         Overview card, sized for easy, confident taps from bed. -->
+    <section class="page page-clock" id="page-clock" aria-label="Clock and Sound Machine">
+      <header class="clock-page-top">
+        <div class="clock-time-huge" id="clock-time-lg" aria-live="off">--:--</div>
+        <div class="clock-date">
+          <span class="clock-weekday" id="clock-weekday-lg">-</span>
+          <span class="clock-monthday" id="clock-monthday-lg">-</span>
+        </div>
+        <div class="alarm-inline" id="alarm-inline">
+          <span class="icon-slot small" id="alarm-title-icon-lg" aria-hidden="true"></span>
+          <span id="alarm-time-lg">–</span>
+        </div>
+      </header>
+
+      <section class="sound-panel-lg" aria-label="Sound Machine">
+        <div class="sound-current sound-current-lg">
+          <span class="icon-slot" id="sound-icon-lg" aria-hidden="true"></span>
+          <span id="sound-name-lg" class="sound-name">Off</span>
+          <div class="sound-controls">
+            <button class="icon-button icon-button-lg" id="sound-play-pause-lg" type="button" aria-label="Play">
+              <span class="icon-slot" id="sound-play-pause-icon-lg" aria-hidden="true"></span>
+            </button>
+            <button class="icon-button icon-button-lg" id="sound-stop-lg" type="button" aria-label="Stop">
+              <span class="icon-slot" id="sound-stop-icon-lg" aria-hidden="true"></span>
+            </button>
+          </div>
+        </div>
+
+        <div class="sound-row sound-row-lg">
+          <button class="icon-button icon-button-small" id="sound-mute-lg" type="button" aria-label="Mute">
+            <span class="icon-slot small" id="volume-icon-lg" aria-hidden="true"></span>
+          </button>
+          <input type="range" id="sound-volume-lg" class="sound-volume sound-volume-lg" min="0" max="100" value="50" aria-label="Volume" />
+          <span class="sound-volume-label" id="sound-volume-label-lg">50%</span>
+        </div>
+
+        <div class="sound-row sound-row-lg">
+          <select class="sound-select sound-select-lg" id="sound-picker-lg" aria-label="Choose sound"></select>
+          <select class="sound-select sound-select-lg" id="timer-picker-lg" aria-label="Sleep timer">
+            <option value="off">Timer: Off</option>
+            <option value="15">Timer: 15m</option>
+            <option value="30">Timer: 30m</option>
+            <option value="45">Timer: 45m</option>
+            <option value="60">Timer: 1h</option>
+            <option value="120">Timer: 2h</option>
+            <option value="untilAlarm">Timer: Alarm</option>
+          </select>
+        </div>
+
+        <div class="sound-recent hidden" id="sound-recent" aria-label="Recently played sounds"></div>
+      </section>
+    </section>
+
+    <!-- Page 4: Wake Alarms - a fully self-contained alarm clock (see
+         checkWakeAlarms() in script.js), scheduled and rung right here on
+         the Echo Show rather than by a phone. -->
+    <section class="page page-alarms" id="page-alarms" aria-label="Wake Alarms">
+      <h2 class="alarms-page-title">
+        <span class="icon-slot" id="wakealarms-title-icon" aria-hidden="true"></span>
+        Wake Alarms
+      </h2>
+
+      <div class="wakealarm-default-sound-row">
+        <span class="wakealarm-default-sound-label">Default alarm sound</span>
+        <select class="sound-select" id="wakealarm-default-sound-picker" aria-label="Default alarm sound"></select>
+      </div>
+
+      <ul class="wakealarm-list" id="wakealarm-list">
+        <li class="wakealarm-empty">No alarms set</li>
+      </ul>
+
+      <div class="wakealarm-form">
+        <div class="wakealarm-form-row">
+          <input type="text" id="wakealarm-label-input" class="wakealarm-label-input" placeholder="Label (optional)" autocomplete="off" aria-label="Alarm label" />
+        </div>
+        <div class="wakealarm-form-row">
+          <input type="time" id="wakealarm-time-input" class="wakealarm-time-input" aria-label="Alarm time" />
+          <select class="sound-select" id="wakealarm-sound-picker" aria-label="Alarm sound"></select>
+        </div>
+        <div class="wakealarm-form-row">
+          <div class="wakealarm-days" id="wakealarm-days" role="group" aria-label="Repeat on"></div>
+          <button class="icon-button" id="wakealarm-add-btn" type="button" aria-label="Add alarm">
+            <span class="icon-slot" id="wakealarm-add-icon" aria-hidden="true"></span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Page 5: Settings. -->
+    <section class="page page-settings" id="page-settings" aria-label="Settings">
+      <div class="settings-section">
+        <h2 class="settings-title">Profile</h2>
+        <div class="settings-text-row">
+          <span class="settings-text-label">Name</span>
+          <input type="text" id="settings-name-input" class="settings-text-input" placeholder="Your name" autocomplete="off" aria-label="Your name" />
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h2 class="settings-title">World Clock</h2>
+        <div class="settings-worldclock-list" id="settings-worldclock-list"></div>
+        <div class="settings-schedule-add-row">
+          <select class="sound-select" id="worldclock-add-timezone" aria-label="City to add">
+            <option value="America/New_York">New York</option>
+            <option value="America/Chicago">Chicago</option>
+            <option value="America/Denver">Denver</option>
+            <option value="America/Los_Angeles">Los Angeles</option>
+            <option value="America/Anchorage">Anchorage</option>
+            <option value="Pacific/Honolulu">Honolulu</option>
+            <option value="America/Sao_Paulo">São Paulo</option>
+            <option value="Europe/London">London</option>
+            <option value="Europe/Paris">Paris</option>
+            <option value="Europe/Berlin">Berlin</option>
+            <option value="Europe/Moscow">Moscow</option>
+            <option value="Africa/Cairo">Cairo</option>
+            <option value="Africa/Johannesburg">Johannesburg</option>
+            <option value="Asia/Dubai">Dubai</option>
+            <option value="Asia/Kolkata">New Delhi</option>
+            <option value="Asia/Shanghai">Shanghai</option>
+            <option value="Asia/Tokyo">Tokyo</option>
+            <option value="Asia/Seoul">Seoul</option>
+            <option value="Australia/Sydney">Sydney</option>
+            <option value="Pacific/Auckland">Auckland</option>
+          </select>
+          <button class="settings-add-btn" type="button" id="worldclock-add-btn">Add</button>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h2 class="settings-title">Dashboard Layout</h2>
+        <div class="settings-layout-list" id="settings-layout-list"></div>
+      </div>
+
+      <div class="settings-section">
+        <h2 class="settings-title">Display</h2>
+        <div class="dim-offset-row">
+          <span class="dim-offset-label">Dim schedule</span>
+          <input type="range" id="dim-offset-slider" class="dim-offset-slider" min="-120" max="120" step="15" value="0" aria-label="Shift auto-dim schedule earlier or later" />
+          <span class="dim-offset-value" id="dim-offset-value">On time</span>
+        </div>
+        <div class="dim-offset-row">
+          <span class="dim-offset-label">Dim intensity</span>
+          <input type="range" id="dim-intensity-slider" class="dim-offset-slider" min="10" max="90" step="5" value="45" aria-label="How dark the display gets at night" />
+          <span class="dim-offset-value" id="dim-intensity-value">45%</span>
+        </div>
+        <div class="settings-text-row">
+          <span class="settings-text-label">Clock format</span>
+          <div class="settings-segmented settings-segmented-inline" id="clock-format-segmented" role="radiogroup" aria-label="Clock format">
+            <button class="settings-segment" type="button" data-format="12h">12-hour</button>
+            <button class="settings-segment" type="button" data-format="24h">24-hour</button>
+          </div>
+        </div>
+        <div class="settings-text-row">
+          <span class="settings-text-label">Temperature</span>
+          <div class="settings-segmented settings-segmented-inline" id="temp-unit-segmented" role="radiogroup" aria-label="Temperature unit">
+            <button class="settings-segment" type="button" data-unit="F">&deg;F</button>
+            <button class="settings-segment" type="button" data-unit="C">&deg;C</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h2 class="settings-title">Weather Background</h2>
+        <div class="settings-text-hint">Override the animated background - on demand or on a daily schedule. Auto follows the real weather.</div>
+        <div class="weatherbg-effect-grid" id="weatherbg-effect-grid" role="radiogroup" aria-label="Weather background effect">
+          <button class="weatherbg-effect-btn" type="button" data-effect="auto">Auto</button>
+          <button class="weatherbg-effect-btn" type="button" data-effect="sunny">Sunny</button>
+          <button class="weatherbg-effect-btn" type="button" data-effect="partlycloudy">Partly Cloudy</button>
+          <button class="weatherbg-effect-btn" type="button" data-effect="clouds">Overcast</button>
+          <button class="weatherbg-effect-btn" type="button" data-effect="fog">Fog</button>
+          <button class="weatherbg-effect-btn" type="button" data-effect="rain">Rain</button>
+          <button class="weatherbg-effect-btn" type="button" data-effect="snow">Snow</button>
+          <button class="weatherbg-effect-btn" type="button" data-effect="storm">Storm</button>
+          <button class="weatherbg-effect-btn" type="button" data-effect="night">Night</button>
+        </div>
+        <div class="settings-text-row">
+          <span class="settings-text-label">Duration</span>
+          <select id="weatherbg-duration-select" class="settings-select" aria-label="Weather background override duration">
+            <option value="15">15 min</option>
+            <option value="30">30 min</option>
+            <option value="60" selected>1 hour</option>
+            <option value="120">2 hours</option>
+            <option value="240">4 hours</option>
+            <option value="restofday">Rest of day</option>
+            <option value="indefinite">Indefinite</option>
+          </select>
+        </div>
+        <div class="settings-schedule-add-row" id="weatherbg-activate-row">
+          <button class="settings-add-btn" type="button" id="weatherbg-activate-btn">Activate now</button>
+          <button class="settings-add-btn settings-btn-secondary hidden" type="button" id="weatherbg-stop-btn">Stop override</button>
+        </div>
+        <div class="settings-text-hint hidden" id="weatherbg-active-hint"></div>
+        <div class="settings-schedule-add-row">
+          <input type="time" id="weatherbg-schedule-time" class="settings-text-input" aria-label="Time to start scheduled weather background" />
+          <button class="settings-add-btn" type="button" id="weatherbg-schedule-add-btn">Schedule</button>
+        </div>
+        <div class="settings-schedule-list" id="weatherbg-schedule-list"></div>
+      </div>
+
+      <div class="settings-section">
+        <h2 class="settings-title">Ambient Mode</h2>
+        <div class="settings-text-row">
+          <span class="settings-text-label">Idle timeout</span>
+          <select id="settings-ambient-timeout" class="settings-select" aria-label="Ambient Mode idle timeout">
+            <option value="5">5 minutes</option>
+            <option value="10">10 minutes</option>
+            <option value="15">15 minutes</option>
+            <option value="30">30 minutes</option>
+            <option value="60">60 minutes</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h2 class="settings-title">Bedside Mode</h2>
+        <div class="settings-text-row">
+          <span class="settings-text-label">Enter automatically</span>
+          <button class="settings-switch" id="auto-bedside-toggle" role="switch" aria-checked="false" aria-label="Enter Bedside Mode automatically"></button>
+        </div>
+        <div class="settings-text-row">
+          <span class="settings-text-label">At</span>
+          <input type="time" id="auto-bedside-time" class="wakealarm-time-input" aria-label="Automatic Bedside Mode time" />
+        </div>
+        <div class="settings-text-row">
+          <span class="settings-text-label">Play sound automatically</span>
+          <button class="settings-switch" id="bedside-auto-sound-toggle" role="switch" aria-checked="true" aria-label="Automatically start the Sound Machine when entering Bedside Mode"></button>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h2 class="settings-title">Sleep History</h2>
+        <div class="settings-text-hint">How long Bedside Mode ran each night - not sensor-based sleep tracking, just when Bedside Mode was on.</div>
+        <div class="sleep-history-chart" id="sleep-history-chart"></div>
+        <div class="settings-text-hint" id="sleep-history-avg">No Bedside Mode sessions yet this week</div>
+      </div>
+
+      <div class="settings-section">
+        <h2 class="settings-title">Theme</h2>
+        <div class="theme-grid" id="theme-grid">
+          <button class="theme-swatch" data-theme-value="default" aria-label="Default theme">
+            <span class="theme-swatch-preview" style="background: linear-gradient(135deg, #000000, #9aa5b1)"></span>
+            <span class="theme-swatch-label">Default</span>
+          </button>
+          <button class="theme-swatch" data-theme-value="materialyou" aria-label="Material You theme">
+            <span class="theme-swatch-preview" style="background: linear-gradient(135deg, #1c1b1f, #d0bcff)"></span>
+            <span class="theme-swatch-label">Material You</span>
+          </button>
+          <button class="theme-swatch" data-theme-value="nothingos" aria-label="Nothing OS theme">
+            <span class="theme-swatch-preview" style="background: linear-gradient(135deg, #000000, #d1223b)"></span>
+            <span class="theme-swatch-label">Nothing OS</span>
+          </button>
+          <button class="theme-swatch" data-theme-value="pixel" aria-label="Pixel theme">
+            <span class="theme-swatch-preview" style="background: linear-gradient(135deg, #131314, #8ab4f8)"></span>
+            <span class="theme-swatch-label">Pixel</span>
+          </button>
+          <button class="theme-swatch" data-theme-value="retrocrt" aria-label="Retro CRT theme">
+            <span class="theme-swatch-preview" style="background: linear-gradient(135deg, #020a02, #33ff66)"></span>
+            <span class="theme-swatch-label">Retro CRT</span>
+          </button>
+          <button class="theme-swatch" data-theme-value="oledminimal" aria-label="OLED Minimal theme">
+            <span class="theme-swatch-preview" style="background: linear-gradient(135deg, #000000, #e0e0e0)"></span>
+            <span class="theme-swatch-label">OLED Minimal</span>
+          </button>
+          <button class="theme-swatch" data-theme-value="catppuccin" aria-label="Catppuccin theme">
+            <span class="theme-swatch-preview" style="background: linear-gradient(135deg, #1e1e2e, #cba6f7)"></span>
+            <span class="theme-swatch-label">Catppuccin</span>
+          </button>
+          <button class="theme-swatch" data-theme-value="nord" aria-label="Nord theme">
+            <span class="theme-swatch-preview" style="background: linear-gradient(135deg, #2e3440, #88c0d0)"></span>
+            <span class="theme-swatch-label">Nord</span>
+          </button>
+          <button class="theme-swatch" data-theme-value="gruvbox" aria-label="Gruvbox theme">
+            <span class="theme-swatch-preview" style="background: linear-gradient(135deg, #282828, #fe8019)"></span>
+            <span class="theme-swatch-label">Gruvbox</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Page 6: Timer & Stopwatch - deliberately its own page rather than
+         squeezed into the already-packed Clock/Sound Machine page, since a
+         countdown/stopwatch wants real tap targets and a big readable
+         number, not another compressed row. -->
+    <section class="page page-timer" id="page-timer" aria-label="Timer and Stopwatch">
+      <div class="settings-segmented timer-mode-segmented" id="timer-mode-segmented" role="radiogroup" aria-label="Timer or stopwatch">
+        <button class="settings-segment active" type="button" data-mode="timer">Timer</button>
+        <button class="settings-segment" type="button" data-mode="stopwatch">Stopwatch</button>
+      </div>
+
+      <div class="timer-view" id="timer-view">
+        <div class="timer-display" id="timer-display">00:00</div>
+        <div class="timer-presets" id="timer-presets">
+          <button class="timer-preset-btn" type="button" data-minutes="1">1m</button>
+          <button class="timer-preset-btn active" type="button" data-minutes="5">5m</button>
+          <button class="timer-preset-btn" type="button" data-minutes="10">10m</button>
+          <button class="timer-preset-btn" type="button" data-minutes="15">15m</button>
+          <button class="timer-preset-btn" type="button" data-minutes="30">30m</button>
+          <button class="timer-preset-btn" type="button" data-minutes="60">60m</button>
+        </div>
+        <div class="timer-actions">
+          <button class="alarm-action-btn" id="timer-start-btn" type="button">Start</button>
+          <button class="alarm-action-btn timer-secondary-btn" id="timer-reset-btn" type="button">Reset</button>
+        </div>
+      </div>
+
+      <div class="timer-view hidden" id="stopwatch-view">
+        <div class="timer-display" id="stopwatch-display">00:00.0</div>
+        <div class="timer-actions">
+          <button class="alarm-action-btn" id="stopwatch-start-btn" type="button">Start</button>
+          <button class="alarm-action-btn timer-secondary-btn" id="stopwatch-lap-btn" type="button" disabled>Lap</button>
+          <button class="alarm-action-btn timer-secondary-btn" id="stopwatch-reset-btn" type="button">Reset</button>
+        </div>
+        <ul class="stopwatch-laps" id="stopwatch-laps"></ul>
+      </div>
+    </section>
+  </div>
+
+  <nav class="page-dots" id="page-dots" aria-label="Dashboard pages">
+    <button class="page-dot" data-page="0" aria-label="Morning Overview"></button>
+    <button class="page-dot" data-page="1" aria-label="Daily Info"></button>
+    <button class="page-dot" data-page="2" aria-label="Clock and Sound Machine"></button>
+    <button class="page-dot" data-page="3" aria-label="Wake Alarms"></button>
+    <button class="page-dot" data-page="4" aria-label="Settings"></button>
+    <button class="page-dot" data-page="5" aria-label="Timer and Stopwatch"></button>
+  </nav>
+
+  <!-- Week-ahead glance and Agenda editor, opened from the Agenda card's
+       calendar icon (see setupWeekView() in script.js). Reuses the
+       sticky-note editor's header/close styling for visual consistency. -->
+  <div class="week-view-backdrop hidden" id="week-view-backdrop"></div>
+  <div class="week-view-popover hidden" id="week-view-popover">
+    <div class="sticky-note-editor-header">
+      <span class="sticky-note-editor-title">This Week</span>
+      <button class="sticky-note-editor-close" id="week-view-close" type="button" aria-label="Close">&times;</button>
+    </div>
+    <div class="week-view-add-row">
+      <input type="date" id="agenda-add-date" class="settings-text-input" aria-label="Event date" />
+      <input type="time" id="agenda-add-time" class="settings-text-input" aria-label="Event time (leave blank for all day)" />
+    </div>
+    <div class="week-view-add-row">
+      <input type="text" id="agenda-add-title" class="settings-text-input" placeholder="Event title…" maxlength="60" autocomplete="off" aria-label="Event title" />
+      <button class="settings-add-btn" type="button" id="agenda-add-btn">Add</button>
+    </div>
+    <div class="week-view-days" id="week-view-days"></div>
+  </div>
+
+  <!-- Outside the pager so it covers whichever page is active when an
+       alarm fires - see startWakeAlarmRinging() in script.js. -->
+  <div class="alarm-ringing-overlay hidden" id="alarm-ringing-overlay" role="alertdialog" aria-label="Alarm ringing">
+    <span class="icon-slot xlarge alarm-ringing-icon" id="alarm-ringing-icon" aria-hidden="true"></span>
+    <div class="alarm-ringing-time" id="alarm-ringing-time">--:--</div>
+    <div class="alarm-ringing-label" id="alarm-ringing-label"></div>
+    <div class="alarm-ringing-actions">
+      <div class="alarm-snooze-group">
+        <button class="alarm-action-btn alarm-snooze-btn" id="alarm-snooze-btn" type="button">Snooze</button>
+        <select class="alarm-snooze-duration" id="alarm-snooze-duration" aria-label="Snooze duration">
+          <option value="5">5m</option>
+          <option value="9">9m</option>
+          <option value="10">10m</option>
+          <option value="15">15m</option>
+          <option value="20">20m</option>
+        </select>
+      </div>
+      <button class="alarm-action-btn alarm-dismiss-btn" id="alarm-dismiss-btn" type="button">Dismiss</button>
+    </div>
+  </div>
+
+  <!-- Bedside Mode - outside the pager (like the alarm overlay above) since
+       it's a special summoned view, not one more page to swipe to. See
+       enterBedsideMode()/exitBedsideMode() in script.js. -->
+  <div class="bedside-overlay hidden" id="bedside-overlay" aria-label="Bedside Mode">
+    <button class="icon-button bedside-exit-btn" id="bedside-exit-btn" type="button" aria-label="Exit Bedside Mode">
+      <span class="icon-slot" id="bedside-exit-icon" aria-hidden="true"></span>
+    </button>
+
+    <div class="bedside-top">
+      <div class="alarm-inline" id="alarm-inline-bedside">
+        <span class="icon-slot small" id="alarm-title-icon-bedside" aria-hidden="true"></span>
+        <span id="alarm-time-bedside">–</span>
+      </div>
+      <div class="bedside-tomorrow" id="bedside-tomorrow"></div>
+    </div>
+
+    <div class="bedside-clock">
+      <div class="clock-time-huge" id="clock-time-bedside" aria-live="off">--:--</div>
+      <div class="clock-date">
+        <span class="clock-weekday" id="clock-weekday-bedside">-</span>
+        <span class="clock-monthday" id="clock-monthday-bedside">-</span>
+      </div>
+    </div>
+
+    <section class="sound-panel-lg bedside-sound-panel" aria-label="Sound Machine">
+      <div class="sound-row sound-row-lg">
+        <span class="icon-slot small" id="bedside-brightness-icon" aria-hidden="true"></span>
+        <input
+          type="range"
+          id="bedside-brightness-slider"
+          class="sound-volume sound-volume-lg"
+          min="10"
+          max="100"
+          step="5"
+          value="50"
+          aria-label="Brightness"
+        />
+        <span class="sound-volume-label" id="bedside-brightness-label">50%</span>
+      </div>
+
+      <div class="sound-current sound-current-lg">
+        <span class="icon-slot" id="sound-icon-bedside" aria-hidden="true"></span>
+        <span id="sound-name-bedside" class="sound-name">Off</span>
+        <div class="sound-controls">
+          <button class="icon-button icon-button-lg" id="sound-play-pause-bedside" type="button" aria-label="Play">
+            <span class="icon-slot" id="sound-play-pause-icon-bedside" aria-hidden="true"></span>
+          </button>
+          <button class="icon-button icon-button-lg" id="sound-stop-bedside" type="button" aria-label="Stop">
+            <span class="icon-slot" id="sound-stop-icon-bedside" aria-hidden="true"></span>
+          </button>
+        </div>
+      </div>
+
+      <div class="sound-row sound-row-lg">
+        <button class="icon-button icon-button-small" id="sound-mute-bedside" type="button" aria-label="Mute">
+          <span class="icon-slot small" id="volume-icon-bedside" aria-hidden="true"></span>
+        </button>
+        <input type="range" id="sound-volume-bedside" class="sound-volume sound-volume-lg" min="0" max="100" value="50" aria-label="Volume" />
+        <span class="sound-volume-label" id="sound-volume-label-bedside">50%</span>
+      </div>
+
+      <div class="sound-row sound-row-lg">
+        <select class="sound-select sound-select-lg" id="sound-picker-bedside" aria-label="Choose sound"></select>
+        <select class="sound-select sound-select-lg" id="timer-picker-bedside" aria-label="Sleep timer">
+          <option value="off">Timer: Off</option>
+          <option value="15">Timer: 15m</option>
+          <option value="30">Timer: 30m</option>
+          <option value="45">Timer: 45m</option>
+          <option value="60">Timer: 1h</option>
+          <option value="120">Timer: 2h</option>
+          <option value="untilAlarm">Timer: Alarm</option>
+        </select>
+      </div>
+    </section>
+  </div>
+
+  <!-- Ambient Mode - a screensaver-style idle view (see setupAmbientMode()
+       in script.js): huge clock, tiny weather, very dim, a twinkling
+       starfield. Any touch exits it. -->
+  <div class="ambient-overlay hidden" id="ambient-overlay" aria-label="Ambient Mode">
+    <div class="ambient-starfield" id="ambient-starfield"></div>
+
+    <div class="ambient-content">
+      <div class="ambient-clock" id="clock-time-ambient">--:--</div>
+      <div class="ambient-weather" id="ambient-weather"></div>
+      <div class="ambient-moon-row">
+        <span class="moon-visual moon-visual-small" id="ambient-moon-visual" aria-hidden="true"></span>
+        <span class="ambient-moon" id="ambient-moon"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Breathing Mode - a guided inhale/hold/exhale/hold exercise, the same
+       "summoned overlay" shape as Bedside/Ambient Mode. See
+       enterBreathingMode() in script.js. -->
+  <div class="breathing-overlay hidden" id="breathing-overlay" aria-label="Breathing exercise, tap anywhere to exit">
+    <div class="breathing-circle" id="breathing-circle"></div>
+    <div class="breathing-label" id="breathing-label">Breathe in</div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>

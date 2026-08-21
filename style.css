@@ -1,0 +1,4621 @@
+/* ==========================================================================
+   Aurora Dashboard - stylesheet
+   Primary target: Amazon Echo Show 5 (1st gen), 960x480 landscape, kiosk
+   Chrome/WebView. Sizing uses clamp()/vw/vh throughout instead of fixed
+   pixel values so the same layout scales sensibly on other screens too.
+
+   Layout insight: the panel is wide (2:1), not tall - a two-column
+   hero+cards layout uses that far better than stacking everything
+   vertically into 480px of height. See .dashboard below.
+   ========================================================================== */
+
+:root {
+  /* Every theme here is dark (see the [data-theme=...] blocks below) -
+     without this, native form control internals that this stylesheet
+     can't directly color (the wakealarm-time-input's "--:-- --" digits/
+     AM-PM segment, in particular) fall back to the WebView's own default
+     light-mode palette and render as black-on-black against this app's
+     dark backgrounds - invisible, not just low-contrast. */
+  color-scheme: dark;
+
+  /* True black background: OLED-friendly, and reads as "premium display"
+     even on the Echo Show's LCD panel. Surfaces sit a little above it,
+     Material dark-theme style, so cards read as distinct elevated layers. */
+  --bg: #000000;
+  --surface: #121212;
+  --surface-elevated: #1c1c1e;
+
+  --text-primary: #f5f5f5;
+  --text-secondary: #9a9a9a;
+  --text-tertiary: #6b6b6b;
+
+  /* Dynamic accent, set by script.js from the current weather condition:
+     warm for clear skies, gray for cloud, blue for rain/snow/storms.
+     This default is the "gray" tone, shown until the first successful
+     weather fetch. */
+  --accent: #9aa5b1;
+  --accent-warm: #ffb74d;
+  --accent-gray: #9aa5b1;
+  --accent-blue: #5b9bf0;
+
+  --accent-reconnecting: #ffb74d;
+  --accent-danger: #ff6b6b;
+
+  --divider: rgba(255, 255, 255, 0.08);
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+
+  --radius-lg: 1.25rem;
+  --radius-md: 0.85rem;
+
+  /* A restrained type scale (v1.1: "better typography") instead of ad-hoc
+     clamp() per element - each size below is used for exactly one job. */
+  --fs-clock: clamp(2.1rem, 8.5vw, 3.4rem);
+  --fs-clock-huge: clamp(3.2rem, 15vw, 6rem);
+  --fs-greeting: clamp(1.25rem, 2.6vw, 1.7rem);
+  --fs-briefing: clamp(0.92rem, 1.7vw, 1.1rem);
+  --fs-display: clamp(1.4rem, 2.8vw, 2rem);
+  --fs-hero: clamp(2.6rem, 8vw, 4.2rem);
+  --fs-title: clamp(0.72rem, 1.3vw, 0.85rem);
+  --fs-body: clamp(0.8rem, 1.5vw, 0.95rem);
+  --fs-body-lg: clamp(0.95rem, 1.9vw, 1.2rem);
+  --fs-caption: clamp(0.68rem, 1.2vw, 0.8rem);
+  --fs-caption-lg: clamp(0.8rem, 1.5vw, 1rem);
+
+  --page-padding: clamp(0.75rem, 2.2vw, 1.75rem);
+
+  --transition-color: 500ms ease;
+  --transition-fast: 200ms ease;
+
+  /* System font stack, not a webfont: the Echo Show may have no internet
+     route to Aurora (let alone a font CDN) for long stretches, and this
+     is meant to be fully self-contained static files. Roboto is the
+     system font on stock Android/LineageOS, so this renders as intended
+     there with zero network dependency. */
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+}
+
+/* ---- Reset / base ------------------------------------------------------ */
+
+* {
+  box-sizing: border-box;
+  /* Kiosk touchscreen, not a browser tab - the WebView's default blue
+     flash on tap reads as a broken link, not a button press. */
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--bg);
+  overflow: hidden; /* kiosk display: no scrollbars on the primary target */
+}
+
+body {
+  font-family: var(--font);
+  color: var(--text-primary);
+  -webkit-user-select: none;
+  user-select: none; /* this is a display, not a document */
+  filter: brightness(1);
+  transition: filter 3s ease;
+  /* Same reasoning as .ambient-clock-panel's own text-shadow below: the
+     clock, greeting, briefing lines, and hero-tile readouts sit directly
+     over the wallpaper with only a scrim behind them (cards have their
+     own solid background and don't need this - inherited here anyway,
+     but imperceptible against a near-black card). A bright or busy user
+     photo can otherwise wash out --text-secondary/--text-tertiary
+     entirely; this keeps everything legible regardless of the photo. */
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7), 0 2px 14px rgba(0, 0, 0, 0.45);
+}
+
+/* Bedside comfort at night: dims the whole display, not just one card -
+   a slow 3s transition so it reads as the room settling in, not a jarring
+   flicker. See applyDayNightMode() in script.js for when this toggles. */
+body.dimmed {
+  /* --dim-intensity is a 0-1 brightness multiplier set from the Settings
+     page's "Dim intensity" slider (see setupDimIntensitySlider() in
+     script.js) - 0.45 is the original hardcoded default, kept as the
+     var()'s fallback so nothing changes for anyone who's never touched
+     the new slider. */
+  filter: brightness(var(--dim-intensity, 0.45)) contrast(0.95);
+}
+
+button,
+select,
+input {
+  font-family: inherit;
+}
+
+/* ---- Pager ----------------------------------------------------------------
+   Four full-screen pages, swiped through horizontally via native touch
+   scrolling + CSS scroll-snap - no JS carousel logic needed for the swipe
+   itself. script.js's setupPager() only keeps the dot indicators in sync
+   and lets a dot tap jump to a page. touch-action: pan-x so the browser
+   commits to horizontal paging gestures here (individual controls that
+   need their own horizontal drag, like the volume slider, override this
+   with touch-action: none - see .sound-volume). */
+
+.pager {
+  position: relative;
+  z-index: 1; /* above the wallpaper (-1); the weather effect (2) still paints over this */
+  height: 100vh;
+  width: 100vw;
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
+  scrollbar-width: none; /* Firefox - kiosk display, a scrollbar is never wanted */
+}
+
+.pager::-webkit-scrollbar {
+  display: none; /* Chromium/WebView */
+}
+
+.page {
+  flex: none;
+  width: 100vw;
+  height: 100vh;
+  scroll-snap-align: start;
+  padding: var(--page-padding);
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+/* ---- Page 1: Morning Overview ---------------------------------------------
+   Two columns: a hero panel (clock + Morning Briefing) and the card grid.
+   The hero panel gets a comfortable fixed-ish share of the width; the
+   grid takes the rest. Falls back to a stacked single column below
+   for other screen shapes - see Responsive section. */
+
+.page-overview {
+  display: grid;
+  grid-template-columns: minmax(260px, 38%) 1fr;
+  grid-template-rows: 1fr;
+  gap: clamp(0.75rem, 2vw, 1.5rem);
+  /* Anchors .overview-banners below. */
+  position: relative;
+}
+
+/* The severe alert banner and sticky note both float here instead of
+   taking their own grid row - an earlier version gave each its own auto
+   row, but that meant appearing at all pushed hero-panel/card-grid's
+   shared row shorter (and both columns' content down with it), since
+   .page's fixed height has nowhere else to give. Floating avoids that
+   entirely: hero-panel and card-grid always get the full row regardless
+   of what's showing here. The trade-off is this briefly covers whatever
+   sits at the very top of both columns while a banner is up (the
+   .hero-panel-actions icon row and the first card row) - acceptable for
+   something meant to be transient and dismissible, unlike a permanent
+   layout shift every time one appears. Flex column stacks whichever of
+   the two is visible; display:none on a hidden banner removes it from
+   this flow, so one banner alone doesn't leave a gap where the other
+   would go. */
+.overview-banners {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+}
+
+.hero-panel {
+  grid-column: 1;
+  grid-row: 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* A real row in the flex column now, not position:absolute over the
+   clock - reserving horizontal padding for it instead (tried first) meant
+   guessing how much width .clock-time actually needs, and guessing wrong
+   either left it overlapping the buttons or wrapping the clock to two
+   lines. A real row costs a little vertical space but needs no guessing:
+   .clock-panel below it always gets the full available width, so the
+   clock is never at risk of wrapping regardless of locale/font/12h-vs-
+   24h text length. */
+.hero-panel-actions {
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5em;
+}
+
+/* Smaller than the default .icon-button size specifically in this pair -
+   this row's whole reason for existing is to cost as little of the hero
+   panel's tight vertical budget as possible. */
+.hero-panel-actions .icon-button {
+  width: clamp(1.7rem, 3vw, 2.2rem);
+  height: clamp(1.7rem, 3vw, 2.2rem);
+}
+
+/* ---- Reading Mode --------------------------------------------------------
+   Distinct from Bedside/Ambient Mode - dims and warms whichever page is
+   showing without taking over the screen (no photo cycling, no clock
+   takeover, cards stay fully visible and legible). A warm dark radial
+   wash rather than a CSS filter (brightness()/sepia()) on body - this
+   kiosk's WebView has been unreliable with some "modern" filter/
+   backdrop effects before (see the mDNS/:has() lessons elsewhere), and a
+   plain gradient overlay is cheaper and has no such risk. pointer-events:
+   none keeps every card/button underneath fully tappable. */
+.reading-mode-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, rgba(40, 22, 8, 0.35), rgba(18, 10, 4, 0.6));
+  opacity: 0;
+  transition: opacity 0.6s ease;
+}
+
+body.reading-mode-active .reading-mode-overlay {
+  opacity: 1;
+}
+
+.reading-mode-trigger-btn[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--surface);
+}
+
+.clock-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: clamp(0.1rem, 0.6vh, 0.3rem);
+}
+
+.clock-time {
+  font-size: var(--fs-clock);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums; /* digits don't jitter the layout as they change */
+}
+
+.clock-date {
+  display: flex;
+  gap: 0.6em;
+  font-size: clamp(0.9rem, 1.8vw, 1.15rem);
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.clock-weekday {
+  color: var(--accent);
+  font-weight: 600;
+  transition: color var(--transition-color);
+}
+
+/* ---- Morning Briefing ------------------------------------------------------
+   Composed client-side from data already on /dashboard - no backend
+   change needed. Deliberately condensed to 3 short lines rather than a
+   longer paragraph: "one glance and you know your day" is best served by
+   less text, not more, on a display meant to be read from across a room. */
+
+.briefing {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(0.35rem, 1vh, 0.55rem);
+  padding-right: clamp(0.5rem, 1.5vw, 1rem);
+}
+
+.briefing-greeting {
+  margin: 0;
+  font-size: var(--fs-greeting);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.briefing-line {
+  margin: 0;
+  font-size: var(--fs-briefing);
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.briefing-line b {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* ---- Status line -----------------------------------------------------------
+   Always present but quiet - "Updated 12s ago" in a muted tone while
+   healthy. Grows a touch more insistent (color only, no layout change)
+   once data goes stale, but never shouts. */
+
+.status-line {
+  display: flex;
+  align-items: center;
+  gap: 0.45em;
+  font-size: var(--fs-caption);
+  color: var(--text-tertiary);
+  transition: color var(--transition-color);
+  cursor: pointer;
+  width: fit-content;
+}
+
+.status-line:active {
+  opacity: 0.6;
+}
+
+.status-line .dot {
+  width: 0.5em;
+  height: 0.5em;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+  transition: transform var(--transition-fast);
+}
+
+/* Tap-to-refresh feedback (see setupManualRefresh() in script.js) - a
+   brief spin on the same dot that otherwise just signals connection
+   state, so tapping reads as "asked for fresh data" without adding a
+   whole separate icon/button to this already-small line. */
+.status-line.refreshing .dot {
+  animation: status-dot-spin 0.6s ease-in-out;
+}
+
+@keyframes status-dot-spin {
+  50% {
+    transform: scale(1.6) rotate(180deg);
+  }
+  100% {
+    transform: scale(1) rotate(360deg);
+  }
+}
+
+.status-line.state-reconnecting {
+  color: var(--accent-reconnecting);
+}
+
+.status-line.state-offline {
+  color: var(--accent-danger);
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* ---- Severe weather alert banner ------------------------------------------
+   NWS-sourced, distinct from the umbrella rain nudge - this is for
+   Extreme/Severe/Moderate/Minor active alerts (tornado, flood, winter
+   storm, etc.), and stays visible on both the Overview and Daily Info
+   pages the whole time one's active, not just a momentary toast. Solid
+   (not tinted, unlike the low-battery banner) so it reads as genuinely
+   urgent, with a slow icon pulse to catch a glance without being frantic. */
+
+.severe-alert-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.55em 0.9em;
+  border-radius: 0.6em;
+  background: var(--accent-danger);
+  color: var(--surface);
+  box-shadow: 0 0.15em 0.6em color-mix(in srgb, var(--accent-danger) 45%, transparent);
+}
+
+.severe-alert-banner .icon-slot {
+  flex: none;
+  animation: severe-alert-pulse 2s ease-in-out infinite;
+}
+
+.severe-alert-text {
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.severe-alert-event {
+  font-weight: 700;
+  font-size: var(--fs-body);
+}
+
+.severe-alert-headline {
+  font-size: var(--fs-caption);
+  opacity: 0.9;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Dismisses the current alert specifically (see dismissedSevereAlertKey
+   in script.js) rather than severe alerts in general - a genuinely new
+   or changed alert still shows even with a prior one dismissed. Colored
+   to match .severe-alert-text against the banner's own --accent-danger
+   background, unlike .sticky-note-dismiss's neutral --text-secondary,
+   since that color would be too low-contrast here. */
+.severe-alert-dismiss {
+  flex: none;
+  background: transparent;
+  border: none;
+  color: var(--surface);
+  opacity: 0.85;
+  font-size: var(--fs-body-lg);
+  line-height: 1;
+  padding: 0.1em 0.3em;
+  cursor: pointer;
+}
+
+@keyframes severe-alert-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* ---- Sticky notes -----------------------------------------------------------
+   Short dashboard-only reminders - up to STICKY_NOTES_MAX of them (see
+   script.js), managed from a popover opened via the pin icon next to
+   Bedside Mode's trigger in .hero-panel-actions, not Settings, since these
+   are meant to be jotted down and cleared in a couple of taps. The banner
+   itself floats over the page rather than taking real layout space (see
+   .overview-banners) - it cycles through whatever notes exist, one at a
+   time, and disappears entirely when there are none. Styled distinctly
+   from the severe-alert banner (accent-tinted,
+   not danger-red) since this is a personal note, not an emergency. */
+
+.sticky-note-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.55em 0.9em;
+  border-radius: 0.6em;
+  background: color-mix(in srgb, var(--accent) 22%, var(--surface));
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.sticky-note-banner .icon-slot {
+  flex: none;
+  color: var(--accent);
+}
+
+.sticky-note-text {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-caption);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sticky-note-count {
+  flex: none;
+  font-size: 0.66rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 999px;
+  padding: 0.15em 0.55em;
+}
+
+.sticky-note-dismiss {
+  flex: none;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: var(--fs-body-lg);
+  line-height: 1;
+  padding: 0.1em 0.3em;
+  cursor: pointer;
+}
+
+/* Invisible full-screen tap-to-close layer behind the editor popover -
+   not a dimmed modal backdrop, since editing a couple of short notes
+   doesn't call for darkening the whole display like Bedside/Ambient
+   Mode's real full-screen takeovers do. */
+.sticky-note-editor-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 59;
+}
+
+.sticky-note-editor {
+  position: fixed;
+  top: 3.4rem;
+  left: 1rem;
+  z-index: 60;
+  width: min(21rem, 82vw);
+  max-height: 70vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-elevated);
+  border-radius: var(--radius-lg);
+  padding: 0.8em 0.9em;
+  box-shadow: 0 0.8em 2em rgba(0, 0, 0, 0.5);
+}
+
+.sticky-note-editor::-webkit-scrollbar {
+  display: none;
+}
+
+/* Shared by the DND and Focus toggles (see setupQuickDurationPopover() in
+   script.js) - centered rather than anchored near the triggering button
+   like the sticky-note editor, since this same popover opens from two
+   different buttons in two different card positions (Overview's compact
+   card, the Phone page's -lg one) rather than one fixed spot. */
+
+/* ---- Week view popover ------------------------------------------------- */
+
+.week-view-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 59;
+}
+
+.week-view-popover {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 60;
+  width: min(28rem, 88vw);
+  max-height: 82vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-elevated);
+  border-radius: var(--radius-lg);
+  padding: 0.8em 0.9em;
+  box-shadow: 0 0.8em 2em rgba(0, 0, 0, 0.5);
+}
+
+.week-view-popover::-webkit-scrollbar {
+  display: none;
+}
+
+.week-view-days {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+}
+
+.week-view-day {
+  background: var(--surface);
+  border-radius: var(--radius-md);
+  padding: 0.5em 0.7em;
+}
+
+.week-view-day-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5em;
+  font-weight: 700;
+  font-size: var(--fs-body);
+  margin-bottom: 0.2em;
+}
+
+.week-view-day.is-today .week-view-day-header {
+  color: var(--accent);
+}
+
+.week-view-day-date {
+  font-size: var(--fs-caption);
+  color: var(--text-tertiary);
+  font-weight: 500;
+}
+
+.week-view-event {
+  display: flex;
+  gap: 0.5em;
+  font-size: var(--fs-caption);
+  color: var(--text-secondary);
+  padding: 0.1em 0;
+}
+
+.week-view-event-time {
+  flex: none;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  width: 3.4em;
+}
+
+.week-view-empty {
+  font-size: var(--fs-caption);
+  color: var(--text-tertiary);
+}
+
+.sticky-note-editor-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.6em;
+}
+
+.sticky-note-editor-title {
+  font-weight: 700;
+  font-size: var(--fs-body);
+}
+
+.sticky-note-editor-close {
+  flex: none;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: var(--fs-body-lg);
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.1em 0.3em;
+}
+
+.sticky-note-add-row {
+  flex: none;
+  display: flex;
+  gap: 0.5em;
+  margin-bottom: 0.7em;
+}
+
+.sticky-note-add-row .settings-text-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.sticky-note-list {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
+}
+
+.sticky-note-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  background: var(--surface);
+  border-radius: var(--radius-md);
+  padding: 0.45em 0.7em;
+}
+
+.sticky-note-item-text {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-caption);
+  overflow-wrap: break-word;
+}
+
+.sticky-note-item-time {
+  flex: none;
+  font-size: 0.68rem;
+  color: var(--text-tertiary);
+}
+
+.sticky-note-item-remove {
+  flex: none;
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  font-size: var(--fs-body-lg);
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.1em 0.3em;
+}
+
+.sticky-note-empty {
+  font-size: var(--fs-caption);
+  color: var(--text-tertiary);
+  padding: 0.4em 0.1em;
+}
+
+/* ---- Sleep History chart --------------------------------------------------
+   A plain 7-bar chart, height driven by inline style (see
+   renderSleepHistory() in script.js) rather than an actual charting
+   library - seven divs is not a case that needs one. */
+.sleep-history-chart {
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.5em;
+  height: 6rem;
+  margin: 0.6em 0 0.3em;
+}
+
+.sleep-bar-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  height: 100%;
+  gap: 0.3em;
+}
+
+.sleep-bar {
+  width: 100%;
+  min-height: 2px;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  background: var(--accent);
+}
+
+.sleep-bar-label {
+  flex: none;
+  font-size: 0.68rem;
+  color: var(--text-tertiary);
+}
+
+/* The Daily Info page's own copy of the severe alert banner floats the
+   same way .overview-banners does on the Overview page, and for the same
+   reason - it used to take a real row ahead of .page-body-split, shrinking
+   the hero-tile's stacked readouts (icon, temp, condition, H/L, sunrise/
+   sunset, rain, AQI, weather details) every time it appeared. Floating
+   here needs no font-size/gap compensation at all, unlike that old
+   approach - .page-body-split always gets the full page height regardless
+   of whether this banner is showing. */
+.page-daily {
+  position: relative;
+}
+
+.page-daily .severe-alert-banner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 5;
+}
+
+/* ---- Card grid -----------------------------------------------------------
+   Rows of two cards each, laid out with flexbox rather than CSS Grid.
+   Grid's 1fr row-track sizing (grid-template-rows: repeat(3, 1fr) inside a
+   grid-in-grid layout) verified correct in desktop Chrome but rendered
+   only 2 of 6 cards on the Echo Show's actual WebView - flexbox's height
+   distribution has much more consistent cross-WebView support.
+
+   Tile order/visibility/size is now customizable from the phone app (see
+   the "layout" field on /dashboard), so the .card-row wrappers themselves
+   are built dynamically by script.js's applyTileLayout() rather than
+   hardcoded in index.html - row/card flex-grow is set inline per row/card
+   from TILE_SIZE_WEIGHT there instead of fixed CSS selectors like
+   ".card-row:nth-child(2)" that would no longer line up with anything. */
+
+.card-grid {
+  grid-column: 2;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(0.5rem, 1.4vw, 1rem);
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+
+.card-row {
+  display: flex;
+  gap: clamp(0.5rem, 1.4vw, 1rem);
+  min-height: 0;
+  min-width: 0;
+}
+
+.card {
+  flex: 1;
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  padding: clamp(0.7rem, 1.6vh, 1.1rem) clamp(0.8rem, 1.6vw, 1.2rem);
+  display: flex;
+  flex-direction: column;
+  gap: clamp(0.3rem, 1vh, 0.55rem);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  animation: card-fade-in 480ms ease-out backwards;
+  transition: box-shadow var(--transition-fast), flex-grow var(--transition-fast);
+}
+
+.card-title {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  font-size: var(--fs-title);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.card-title .icon-slot {
+  color: var(--text-secondary);
+}
+
+/* Sits at the end of a .card-title/.panel-title row (both already
+   display: flex) - margin-left: auto pushes it flush right without
+   needing a wrapper element. */
+
+/* The DND toggle re-uses .notif-clear-btn's shape - this just adds a
+   persistent "on" indicator distinct from the momentary :active press
+   state above. */
+
+.card-body {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(0.15rem, 0.6vh, 0.3rem);
+  min-height: 0;
+}
+
+/* ---- Icons -----------------------------------------------------------------
+   Inline Material-style SVGs (script.js), sized via this wrapper so every
+   icon - weather, battery, bell, calendar, alarm, speaker, transport
+   controls - shares one consistent footprint and inherits color (and so
+   the weather-driven accent color) via currentColor. No icon font/CDN:
+   keeps the dashboard fully self-contained and offline-safe. */
+
+.icon-slot {
+  display: inline-flex;
+  width: clamp(1.4rem, 2.6vw, 1.9rem);
+  height: clamp(1.4rem, 2.6vw, 1.9rem);
+  color: var(--accent);
+  flex: none;
+  transition: color var(--transition-color);
+}
+
+.icon-slot svg {
+  width: 100%;
+  height: 100%;
+}
+
+.icon-slot.small {
+  width: clamp(1rem, 1.8vw, 1.3rem);
+  height: clamp(1rem, 1.8vw, 1.3rem);
+  color: var(--text-secondary);
+}
+
+/* ---- Weather card -------------------------------------------------------- */
+
+.card-weather .card-body {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: clamp(0.5rem, 1.2vw, 0.85rem);
+  row-gap: 0.2rem;
+}
+
+.card-weather .icon-slot {
+  grid-row: span 2;
+}
+
+.weather-readout {
+  display: flex;
+  flex-direction: column;
+}
+
+.weather-temp {
+  font-size: var(--fs-display);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+}
+
+.weather-condition {
+  font-size: var(--fs-caption);
+  color: var(--text-secondary);
+}
+
+.weather-range {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 1.1em;
+  font-size: var(--fs-caption);
+  color: var(--text-secondary);
+}
+
+.weather-range b {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.weather-rain {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  font-size: var(--fs-caption);
+  color: var(--accent);
+  transition: color var(--transition-color);
+}
+
+.weather-rain .icon-slot.small {
+  color: inherit;
+}
+
+/* ---- Agenda card ------------------------------------------------------------ */
+
+.schedule-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(0.25rem, 0.8vh, 0.45rem);
+  overflow: hidden;
+}
+
+.schedule-item {
+  display: flex;
+  gap: 0.6em;
+  align-items: baseline;
+  font-size: var(--fs-body);
+}
+
+.schedule-time {
+  flex: none;
+  min-width: 4.2em;
+  color: var(--accent);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  transition: color var(--transition-color);
+}
+
+.schedule-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-empty {
+  color: var(--text-tertiary);
+  font-style: italic;
+  font-size: var(--fs-body);
+}
+
+/* ---- Next Alarm card ------------------------------------------------------- */
+
+.card-alarm .card-body {
+  display: flex;
+  align-items: center;
+  gap: clamp(0.5rem, 1.2vw, 0.85rem);
+}
+
+.alarm-time {
+  font-size: var(--fs-display);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Sound Machine card ----------------------------------------------------
+   The one card with real controls - touch is genuinely required here,
+   unlike the rest of the dashboard. */
+
+.sound-current {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+.sound-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sound-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+}
+
+.sound-volume {
+  flex: 1;
+  min-width: 0;
+  height: 1.3em;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+  /* Without this, a horizontal drag on the thumb is ambiguous with the
+     .pager's own horizontal swipe-to-change-page gesture on the same
+     axis - touch-action: none hands the whole gesture to the slider. */
+  touch-action: none;
+}
+
+.sound-volume::-webkit-slider-runnable-track {
+  height: 0.35em;
+  border-radius: 999px;
+  background: var(--surface-elevated);
+}
+
+.sound-volume::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 1em;
+  height: 1em;
+  margin-top: -0.33em;
+  border-radius: 50%;
+  background: var(--accent);
+  border: none;
+  transition: background var(--transition-color);
+}
+
+.sound-volume::-moz-range-track {
+  height: 0.35em;
+  border-radius: 999px;
+  background: var(--surface-elevated);
+}
+
+.sound-volume::-moz-range-thumb {
+  width: 1em;
+  height: 1em;
+  border-radius: 50%;
+  background: var(--accent);
+  border: none;
+  transition: background var(--transition-color);
+}
+
+.sound-volume-label {
+  flex: none;
+  min-width: 2.6em;
+  text-align: right;
+  font-size: var(--fs-caption);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.sound-select {
+  flex: 1;
+  min-width: 0;
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-md);
+  padding: 0.35em 0.5em;
+  font-size: var(--fs-caption);
+  text-overflow: ellipsis;
+}
+
+.sound-controls {
+  display: flex;
+  flex: none;
+  gap: 0.5em;
+}
+
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: clamp(2.2rem, 4vw, 2.8rem);
+  height: clamp(2.2rem, 4vw, 2.8rem);
+  border-radius: 50%;
+  border: none;
+  background: var(--surface-elevated);
+  color: var(--accent);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-color), transform var(--transition-fast);
+}
+
+.icon-button:active {
+  transform: scale(0.92);
+  background: var(--accent);
+  color: var(--surface);
+}
+
+.icon-button .icon-slot {
+  width: 55%;
+  height: 55%;
+  color: inherit;
+}
+
+/* A plain clickable icon with no circular background - for a small inline
+   toggle like the volume-row mute button, where the full .icon-button
+   pill would visually outweigh the slider/label it sits next to. Keeps a
+   generous touch target via padding rather than a large visible shape. */
+.icon-button-small {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.3em;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color var(--transition-fast);
+}
+
+.icon-button-small:active {
+  color: var(--accent);
+}
+
+.icon-button-small .icon-slot {
+  color: inherit;
+}
+
+.icon-slot.xlarge {
+  width: clamp(2.4rem, 6vw, 3.6rem);
+  height: clamp(2.4rem, 6vw, 3.6rem);
+}
+
+/* ---- Pages 2 & 3: Phone / Daily Info ---------------------------------------
+   Both share the same shape: a big glanceable "hero" readout on the left
+   (battery % or temperature) and a full-height list panel on the right
+   (notifications or schedule) with more room than their compact Morning
+   Overview counterparts. */
+
+.page-body-split {
+  height: 100%;
+  display: flex;
+  gap: clamp(1rem, 3vw, 2rem);
+}
+
+/* Daily Info's own page becomes a column so an optional severe alert
+   banner above .page-body-split takes its natural height (0 when hidden)
+   instead of .page-body-split's fixed height:100% overflowing the page. */
+.page-daily {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6em;
+}
+
+.page-daily .page-body-split {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+}
+
+.hero-tile {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: clamp(0.3rem, 1vh, 0.6rem);
+}
+
+.hero-value {
+  font-size: var(--fs-hero);
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Daily Info's hero-tile stacks more rows than Phone's (icon, temp,
+   condition, H/L, sunrise/sunset, AQI, details) - on the Echo Show's fixed
+   960x480 viewport this overflows the page, confirmed live (the
+   weather-details-lg line was clipped at the screen edge).
+   --fs-hero/.icon-slot.xlarge are width-driven (vw) clamps, not
+   height-aware, so they don't shrink on their own - override
+   unconditionally for this page. */
+.page-daily .hero-tile {
+  gap: clamp(0.15rem, 0.6vh, 0.35rem);
+}
+
+.page-daily .icon-slot.xlarge {
+  width: clamp(1.8rem, 4vw, 2.6rem);
+  height: clamp(1.8rem, 4vw, 2.6rem);
+}
+
+.page-daily .hero-value {
+  font-size: clamp(2rem, 6vw, 3rem);
+}
+
+.hero-caption {
+  font-size: var(--fs-body-lg);
+  color: var(--text-secondary);
+}
+
+.weather-range-lg {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2em 1.2em;
+  font-size: var(--fs-body-lg);
+  color: var(--text-secondary);
+}
+
+/* Wraps whole phrase-to-phrase ("Sunrise 6:50 AM" / "Sunset 8:13 PM" on
+   separate lines) rather than mid-phrase, when the hero-tile column is
+   too narrow to fit both side by side - a plain flex-wrap alone would
+   otherwise let each span itself break between "6:50" and "AM". */
+.weather-range-lg > span {
+  white-space: nowrap;
+}
+
+.weather-range-lg b {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.weather-rain-lg {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  font-size: var(--fs-body-lg);
+  color: var(--accent);
+  transition: color var(--transition-color);
+}
+
+.weather-rain-lg .icon-slot.small {
+  color: inherit;
+}
+
+.weather-aqi-lg {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  font-size: var(--fs-body-lg);
+  color: var(--text-secondary);
+}
+
+.weather-aqi-lg .icon-slot.small {
+  color: inherit;
+}
+
+/* One compact line for feels-like/wind/humidity/UV rather than a row
+   each - hero-tile is already tight (icon, temp, condition, H/L,
+   sunrise/sunset, rain, AQI all share this column), and these four are
+   secondary detail, not headline numbers. Uses --text-secondary rather
+   than --text-tertiary - confirmed live that --fs-caption + tertiary
+   nearly disappears against a busy wallpaper photo even with the body's
+   text-shadow, since it's both the smallest text and the dimmest color
+   on the page at the same time. */
+.weather-details-lg {
+  font-size: var(--fs-caption);
+  color: var(--text-secondary);
+}
+
+/* ---- Daily forecast strip (Daily Info page) -------------------------------
+   Today plus the next few days, each a small column of weekday/icon/
+   high-low - sits above the hero-tile/radar/schedule row so it doesn't
+   compete with them for the same horizontal space. Hidden entirely
+   (rather than a placeholder row) until Aurora reports at least one day. */
+
+.forecast-strip {
+  display: flex;
+  gap: clamp(0.4rem, 1vw, 0.75rem);
+  padding: clamp(0.5rem, 1.2vh, 0.8rem) clamp(0.8rem, 1.6vw, 1.2rem);
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+}
+
+.forecast-day {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2em;
+}
+
+.forecast-day-label {
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.forecast-day .icon-slot {
+  width: clamp(1.3rem, 2.6vw, 1.7rem);
+  height: clamp(1.3rem, 2.6vw, 1.7rem);
+  color: var(--accent);
+  transition: color var(--transition-color);
+}
+
+.forecast-day-temps {
+  font-size: var(--fs-caption);
+  display: flex;
+  gap: 0.4em;
+  font-variant-numeric: tabular-nums;
+}
+
+.forecast-day-temps b {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.forecast-day-temps span {
+  color: var(--text-tertiary);
+}
+
+.panel {
+  flex: 1.3;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(0.5rem, 1.5vh, 0.85rem);
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  padding: clamp(1rem, 2.2vh, 1.5rem) clamp(1.1rem, 2.2vw, 1.6rem);
+  overflow: hidden;
+}
+
+/* ---- Radar panel (Daily Info page) ----------------------------------------
+   A live NWS ridge radar loop for whichever station covers the phone's
+   current location (Aurora resolves the station id; the image itself is
+   fetched directly from radar.weather.gov by the browser - see the
+   comment above refreshRadarImage() in script.js for why). Hidden
+   entirely rather than showing a broken-image icon whenever the station
+   is unknown or the image fails to load - a kiosk display should never
+   show a broken-asset glyph. */
+
+.panel-radar {
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+}
+
+.radar-image {
+  flex: 1;
+  min-height: 0;
+  max-width: 100%;
+  object-fit: contain;
+  border-radius: var(--radius-md);
+}
+
+.panel-title {
+  margin: 0;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  font-size: var(--fs-title);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.schedule-list-lg {
+  flex: 1;
+  min-height: 0;
+  gap: clamp(0.5rem, 1.6vh, 0.9rem);
+}
+
+.schedule-list-lg .schedule-item,
+.schedule-list-lg .schedule-empty {
+  font-size: var(--fs-body-lg);
+}
+
+.schedule-list-lg .schedule-time {
+  min-width: 5em;
+}
+
+/* ---- Page 4: Clock, Alarm, Sound Machine -----------------------------------
+   The bedside page: clock is the single most prominent element on the
+   entire dashboard, Alarm rides along underneath as a small companion
+   line, and Sound Machine gets a bigger version of the Overview card's
+   controls - same layout, larger touch targets - filling the rest of the
+   page. */
+
+.page-clock {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(0.75rem, 2vh, 1.25rem);
+}
+
+.clock-page-top {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: clamp(0.15rem, 0.8vh, 0.35rem);
+}
+
+.clock-time-huge {
+  font-size: var(--fs-clock-huge);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+.alarm-inline {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  margin-top: 0.2rem;
+  font-size: var(--fs-body-lg);
+  color: var(--text-secondary);
+}
+
+.sound-panel-lg {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: clamp(0.6rem, 2vh, 1.1rem);
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  padding: clamp(1rem, 2.5vh, 1.75rem) clamp(1.2rem, 3vw, 2rem);
+}
+
+.sound-current-lg {
+  font-size: var(--fs-body-lg);
+}
+
+.sound-row-lg {
+  gap: 0.7em;
+}
+
+.sound-volume-lg {
+  height: 1.6em;
+}
+
+.sound-volume-lg::-webkit-slider-runnable-track {
+  height: 0.45em;
+}
+
+.sound-volume-lg::-webkit-slider-thumb {
+  width: 1.3em;
+  height: 1.3em;
+  margin-top: -0.43em;
+}
+
+.sound-volume-lg::-moz-range-track {
+  height: 0.45em;
+}
+
+.sound-volume-lg::-moz-range-thumb {
+  width: 1.3em;
+  height: 1.3em;
+}
+
+.sound-select-lg {
+  font-size: var(--fs-caption-lg);
+  padding: 0.5em 0.7em;
+}
+
+/* Quick-select chips for the last few distinct sounds actually played -
+   see RECENT_SOUNDS_KEY in script.js. Clock/Sound page only (there's no
+   room for this on the compact Overview card); hidden entirely until at
+   least one sound has been picked, rather than showing empty placeholder
+   chips. */
+.sound-recent {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5em;
+}
+
+.sound-recent-chip {
+  flex: none;
+  background: var(--surface-elevated);
+  color: var(--text-secondary);
+  border: 1px solid var(--divider);
+  border-radius: 999px;
+  padding: 0.4em 0.9em;
+  font-family: inherit;
+  font-size: var(--fs-caption);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.sound-recent-chip.active {
+  background: var(--accent);
+  color: var(--surface);
+  border-color: var(--accent);
+}
+
+.icon-button-lg {
+  width: clamp(3.2rem, 7vw, 4.2rem);
+  height: clamp(3.2rem, 7vw, 4.2rem);
+}
+
+/* ---- Page 5: Wake Alarms ---------------------------------------------------
+   Aurora's own alarm clock, set and edited right here rather than on the
+   phone - a bedside display is the natural place to manage a bedside
+   alarm. Existing list items scroll if there are many; the add-alarm form
+   stays pinned at the bottom. */
+
+.page-alarms {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(0.6rem, 1.5vh, 1rem);
+}
+
+.alarms-page-title {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  margin: 0;
+  font-size: var(--fs-body-lg);
+  font-weight: 600;
+}
+
+.wakealarm-default-sound-row {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6em;
+  font-size: var(--fs-caption);
+  color: var(--text-secondary);
+}
+
+.wakealarm-default-sound-label {
+  flex: none;
+}
+
+.wakealarm-default-sound-row .sound-select {
+  flex: none;
+  max-width: 60%;
+}
+
+.wakealarm-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+}
+
+.wakealarm-empty {
+  color: var(--text-tertiary);
+  font-size: var(--fs-caption);
+}
+
+.wakealarm-item {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.7em;
+  background: var(--surface);
+  border-radius: var(--radius-md);
+  padding: 0.6em 0.9em;
+}
+
+.wakealarm-item.disabled {
+  opacity: 0.45;
+}
+
+.wakealarm-toggle {
+  flex: none;
+  width: 1.3em;
+  height: 1.3em;
+  accent-color: var(--accent);
+}
+
+.wakealarm-item-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1em;
+}
+
+.wakealarm-item-time {
+  font-size: var(--fs-body-lg);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.wakealarm-item-label {
+  font-size: var(--fs-caption);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wakealarm-item-days {
+  font-size: var(--fs-caption);
+  color: var(--text-secondary);
+}
+
+.wakealarm-delete {
+  flex: none;
+  width: clamp(1.9rem, 3.5vw, 2.3rem);
+  height: clamp(1.9rem, 3.5vw, 2.3rem);
+}
+
+.wakealarm-form {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+  background: var(--surface);
+  border-radius: var(--radius-md);
+  padding: 0.7em 0.9em;
+}
+
+.wakealarm-form-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+}
+
+.wakealarm-time-input {
+  flex: none;
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-md);
+  padding: 0.35em 0.5em;
+  font-size: var(--fs-caption);
+}
+
+.wakealarm-label-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-md);
+  padding: 0.35em 0.6em;
+  font-family: inherit;
+  font-size: var(--fs-caption);
+}
+
+.wakealarm-label-input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.wakealarm-days {
+  flex: 1;
+  display: flex;
+  gap: 0.35em;
+}
+
+.wakealarm-day-btn {
+  flex: 1;
+  min-width: 0;
+  padding: 0.4em 0;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--divider);
+  background: var(--surface-elevated);
+  color: var(--text-secondary);
+  font-size: var(--fs-caption);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-color);
+}
+
+.wakealarm-day-btn.active {
+  background: var(--accent);
+  color: var(--surface);
+  border-color: var(--accent);
+}
+
+/* ---- Page 6: Settings -------------------------------------------------------
+   Covers most of what used to be phone-app-only: profile, notifications,
+   wallpaper, dashboard layout, display, ambient mode, home network, and
+   theme. Unlike every other page (deliberately overflow:hidden, "nothing
+   ever scrolls"), Settings scrolls vertically - with this many sections it
+   no longer fits one 960x480 screen, and unlike a layout bug, scrolling on
+   a Settings page under touch is completely normal UX (see setupThemePicker()
+   and friends in script.js; [data-theme] blocks near the end of this file
+   for the theme swapping itself). */
+
+.page-settings {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  gap: clamp(1rem, 2.2vh, 1.5rem);
+}
+
+/* Hides the scrollbar track/thumb (still fully scrollable by touch or
+   drag) - a visible scrollbar reads as desktop-web chrome, not a kiosk
+   display control. */
+.page-settings::-webkit-scrollbar {
+  display: none;
+}
+
+.settings-section {
+  flex: none;
+}
+
+.settings-title {
+  font-size: var(--fs-display);
+  font-weight: 700;
+  margin: 0 0 clamp(0.6rem, 1.6vh, 1rem);
+}
+
+/* Fixed height (rather than flex:1 filling whatever's left, back when this
+   was the only section on the page) - with several sibling sections now
+   sharing the scrolling column, the grid should size to its own content,
+   not compete for remaining space. 3 equal-height rows within that fixed
+   height, same reasoning as before: width-driven aspect-ratio boxes would
+   make 3 rows taller than intended on this wide-short screen (see
+   .theme-swatch-preview below, which fills its row instead of setting its
+   own height). */
+.theme-grid {
+  flex: none;
+  height: clamp(10rem, 30vh, 14rem);
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  gap: clamp(0.5rem, 1.4vh, 0.85rem) clamp(0.6rem, 1.6vw, 1rem);
+}
+
+/* ---- Dashboard Layout settings ----------------------------------------------
+   The dashboard-side equivalent of the phone app's CustomizeLayoutScreen -
+   visibility/size/order for the Overview page's 6 card-grid tiles (see
+   TILE_DOM_ID/DEFAULT_TILE_LAYOUT earlier in this file, and
+   applyTileLayout() which actually renders whatever order/size this
+   produces). Up/down buttons rather than drag-and-drop reordering -
+   deliberately, matching the "avoid cutting-edge WebView features" lesson
+   already learned the hard way with mDNS/:has() on this same kiosk
+   WebView; a plain button tap is unambiguous where a drag gesture risks
+   conflicting with the pager's own horizontal swipe. */
+
+.settings-layout-list {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
+}
+
+.settings-layout-row {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  padding: 0.5em 0.9em;
+}
+
+.settings-layout-row .settings-app-label {
+  flex: 1;
+}
+
+.settings-size-segmented {
+  flex: none;
+  display: flex;
+  background: var(--surface-elevated);
+  border-radius: var(--radius-md);
+  padding: 0.2em;
+}
+
+.settings-size-btn {
+  flex: none;
+  width: 1.8em;
+  background: transparent;
+  border: none;
+  border-radius: calc(var(--radius-md) - 0.15em);
+  padding: 0.3em 0;
+  font-family: inherit;
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.settings-size-btn.active {
+  background: var(--accent);
+  color: var(--surface);
+}
+
+.settings-reorder-btn {
+  flex: none;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: var(--fs-body-lg);
+  line-height: 1;
+  padding: 0.2em 0.3em;
+  cursor: pointer;
+}
+
+.settings-reorder-btn:disabled {
+  color: var(--text-tertiary);
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* ---- Wallpaper settings -----------------------------------------------------
+   Manages the same photo library Ambient Mode already loads (see
+   ensureAmbientPhotosLoaded()/ambientPhotoIds in script.js) - no separate
+   fetch, this is genuinely the same data. Rotate/Single/Schedule mirrors
+   Aurora's WallpaperMode enum exactly (see applyWallpaperMode(), already
+   reading these same three modes off every /dashboard poll - this section
+   is purely the write side that was missing). */
+
+.settings-segmented {
+  flex: none;
+  display: flex;
+  gap: 0.4em;
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  padding: 0.35em;
+  margin-bottom: 0.6em;
+}
+
+.settings-segment {
+  flex: 1;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-md);
+  padding: 0.5em 0.4em;
+  font-family: inherit;
+  font-size: var(--fs-body);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.settings-segment.active {
+  background: var(--accent);
+  color: var(--surface);
+}
+
+/* A second, compact use of the same segmented-control look - nested
+   inside a .settings-text-row (label + control) instead of standing alone
+   under its own section title, for simple two-option settings like clock
+   format / temperature unit that don't need a whole section to themselves. */
+.settings-segmented-inline {
+  flex: 1;
+  margin-bottom: 0;
+  max-width: 16em;
+}
+
+.settings-segmented-inline .settings-segment {
+  font-size: var(--fs-caption);
+  padding: 0.4em 0.3em;
+}
+
+.settings-photo-grid {
+  flex: none;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0.5em;
+  max-height: 22vh;
+  overflow-y: auto;
+  margin-bottom: 0.6em;
+}
+
+.settings-photo-grid::-webkit-scrollbar {
+  display: none;
+}
+
+.settings-photo-thumb {
+  aspect-ratio: 1;
+  border-radius: var(--radius-md);
+  border: 2px solid transparent;
+  background-color: var(--surface);
+  background-size: cover;
+  background-position: center;
+  cursor: pointer;
+  padding: 0;
+  transition: border-color var(--transition-fast);
+}
+
+.settings-photo-thumb.active {
+  border-color: var(--accent);
+}
+
+.settings-photo-empty {
+  grid-column: 1 / -1;
+  font-size: var(--fs-body);
+  color: var(--text-tertiary);
+  padding: 0.6em 0.2em;
+}
+
+.settings-schedule-add-row {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  margin-bottom: 0.5em;
+}
+
+.settings-schedule-add-row .settings-text-input {
+  flex: none;
+  width: 7em;
+  text-align: left;
+}
+
+.settings-add-btn {
+  flex: none;
+  background: var(--accent);
+  color: var(--surface);
+  border: none;
+  border-radius: var(--radius-md);
+  padding: 0.5em 1.1em;
+  font-family: inherit;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.settings-schedule-list {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
+  max-height: 20vh;
+  overflow-y: auto;
+}
+
+.settings-schedule-list::-webkit-scrollbar {
+  display: none;
+}
+
+.settings-schedule-row {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.75em;
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  padding: 0.5em 1em;
+}
+
+.settings-schedule-row .settings-photo-thumb {
+  flex: none;
+  width: 2em;
+  height: 2em;
+  cursor: default;
+}
+
+.settings-schedule-time {
+  flex: 1;
+  font-size: var(--fs-body);
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-schedule-remove {
+  flex: none;
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  font-size: var(--fs-body-lg);
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.2em 0.4em;
+}
+
+/* ---- Profile / Home Network settings --------------------------------------
+   The dashboard's first text inputs - everything before this was toggles,
+   sliders, and swatches. Same row shape as .dim-offset-row (label + one
+   control on a surface pill), styled to look native to the dark theme
+   rather than a default browser text field. See setupProfileSettings()/
+   setupHomeNetworkSettings() in script.js - both commit on blur, not per
+   keystroke, so a mid-typing partial value never gets POSTed. */
+
+.settings-text-row {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.75em;
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  padding: 0.7em 1em;
+}
+
+.settings-text-label {
+  flex: none;
+  font-size: var(--fs-body);
+  color: var(--text-secondary);
+}
+
+.settings-text-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--surface-elevated);
+  border: 2px solid transparent;
+  border-radius: var(--radius-md);
+  padding: 0.5em 0.8em;
+  font-family: inherit;
+  font-size: var(--fs-body);
+  color: var(--text-primary);
+  text-align: right;
+  transition: border-color var(--transition-fast);
+}
+
+.settings-text-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.settings-text-input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.settings-text-hint {
+  flex: none;
+  font-size: var(--fs-caption);
+  color: var(--text-tertiary);
+  margin-top: 0.4em;
+}
+
+.settings-select {
+  flex: none;
+  background: var(--surface-elevated);
+  border: 2px solid transparent;
+  border-radius: var(--radius-md);
+  padding: 0.5em 0.8em;
+  font-family: inherit;
+  font-size: var(--fs-body);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.settings-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* A quieter alternative to .settings-add-btn's filled accent look, for a
+   secondary action sitting right next to a primary one (e.g. "Stop
+   override" beside "Activate now") that shouldn't compete for attention. */
+.settings-btn-secondary {
+  background: var(--surface-elevated);
+  color: var(--text-secondary);
+}
+
+/* ---- Weather Background override settings ----------------------------------
+   Forces one of the same 8 animated weather-effect layers
+   (WEATHER_BG_BY_CONDITION in script.js) regardless of the real weather -
+   "Auto" (the default) just means setWeatherBackground() keeps following
+   the real condition like it always has. Pure localStorage/display
+   conceit, same reasoning as the theme picker - nothing here is real
+   weather data, so it never touches Aurora. */
+
+.weatherbg-effect-grid {
+  flex: none;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.4em;
+  margin-bottom: 0.6em;
+}
+
+.weatherbg-effect-btn {
+  flex: none;
+  background: var(--surface);
+  border: 2px solid transparent;
+  border-radius: var(--radius-md);
+  padding: 0.55em 0.4em;
+  font-family: inherit;
+  font-size: var(--fs-caption);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.weatherbg-effect-btn.active {
+  background: var(--accent);
+  color: var(--surface);
+}
+
+/* ---- Notifications settings ------------------------------------------------
+   The dashboard-side equivalent of the phone app's NotificationAppsCard -
+   every app that's ever posted a notification, with a switch for whether
+   it's allowed to show on the dashboard. Lazy-loaded only when this page
+   is actually scrolled to (see ensureNotificationAppsLoaded() in script.js)
+   since the full app list only matters here, not every 30s poll. */
+
+.settings-app-list {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.settings-app-list::-webkit-scrollbar {
+  display: none;
+}
+
+.settings-app-row {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.75em;
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  padding: 0.55em 1em;
+}
+
+.settings-app-label {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-body);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-app-empty {
+  flex: none;
+  font-size: var(--fs-body);
+  color: var(--text-tertiary);
+  padding: 0.6em 0.2em;
+}
+
+/* A generic on/off pill switch - the first one this dashboard has needed
+   (everything else so far was an icon button or a slider). "Checked" here
+   always means "showing on the dashboard", the inverse of the blocklist's
+   own `blocked` flag, since that reads more naturally as a control. */
+.settings-switch {
+  flex: none;
+  position: relative;
+  width: 2.4em;
+  height: 1.4em;
+  border-radius: 999px;
+  background: var(--surface-elevated);
+  border: none;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.settings-switch::after {
+  content: "";
+  position: absolute;
+  top: 0.15em;
+  left: 0.15em;
+  width: 1.1em;
+  height: 1.1em;
+  border-radius: 50%;
+  background: var(--text-secondary);
+  transition: transform var(--transition-fast), background var(--transition-fast);
+}
+
+.settings-switch[aria-checked="true"] {
+  background: var(--accent);
+}
+
+.settings-switch[aria-checked="true"]::after {
+  transform: translateX(1em);
+  background: var(--surface);
+}
+
+/* ---- Display settings ------------------------------------------------------
+   A manual nudge on top of applyDayNightMode()'s sunrise/sunset-driven
+   schedule (see script.js) - shifts both edges of the dim window by the
+   same offset rather than exposing two separate controls, since "I want
+   it darker earlier tonight" is the actual use case, not independently
+   retuning sunrise vs sunset. */
+
+.dim-offset-row {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.75em;
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  padding: 0.7em 1em;
+}
+
+.dim-offset-label {
+  flex: none;
+  font-size: var(--fs-body);
+  color: var(--text-secondary);
+}
+
+.dim-offset-slider {
+  flex: 1;
+  min-width: 0;
+  height: 1.3em;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.dim-offset-slider::-webkit-slider-runnable-track {
+  height: 0.35em;
+  border-radius: 999px;
+  background: var(--surface-elevated);
+}
+
+.dim-offset-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 1em;
+  height: 1em;
+  margin-top: -0.33em;
+  border-radius: 50%;
+  background: var(--accent);
+  border: none;
+}
+
+.dim-offset-value {
+  flex: none;
+  min-width: 6.5em;
+  text-align: right;
+  font-size: var(--fs-caption);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.theme-swatch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.6em;
+  min-height: 0;
+  background: var(--surface);
+  border: 2px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.theme-swatch.active {
+  border-color: var(--accent);
+  background: var(--surface-elevated);
+}
+
+.theme-swatch-preview {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border-radius: var(--radius-md);
+}
+
+.theme-swatch-label {
+  font-size: var(--fs-caption);
+  color: var(--text-secondary);
+}
+
+/* ---- Alarm ringing overlay --------------------------------------------------
+   The one place this whole dashboard is allowed to be loud - covers every
+   page, since the point is to be impossible to miss regardless of which
+   page was showing when it fires. See reconcileWakeAlarm() in script.js. */
+
+.alarm-ringing-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6em;
+  background: var(--bg);
+  animation: alarm-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes alarm-pulse {
+  0%, 100% {
+    background: var(--bg);
+  }
+  50% {
+    background: color-mix(in srgb, var(--accent-danger) 25%, var(--bg));
+  }
+}
+
+/* Synced to the same 1.6s cadence as alarm-pulse so the icon and
+   background beat together rather than fighting for attention. */
+.alarm-ringing-icon {
+  color: var(--accent-danger);
+  animation: alarm-icon-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes alarm-icon-pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.15);
+  }
+}
+
+.alarm-ringing-time {
+  font-size: var(--fs-clock-huge);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.alarm-ringing-label {
+  font-size: var(--fs-body-lg);
+  color: var(--text-secondary);
+}
+
+.alarm-ringing-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 1em;
+  margin-top: 1em;
+}
+
+.alarm-action-btn {
+  padding: 0.8em 2em;
+  border-radius: var(--radius-lg);
+  border: none;
+  font-size: var(--fs-body-lg);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.alarm-snooze-btn {
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+}
+
+.alarm-snooze-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4em;
+}
+
+.alarm-snooze-duration {
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  font-size: var(--fs-caption);
+  text-align: center;
+}
+
+.alarm-dismiss-btn {
+  background: var(--accent-danger);
+  color: var(--bg);
+}
+
+/* ---- Timer & Stopwatch page --------------------------------------------
+   Centered single-column layout, big tabular-nums readout - the whole
+   point of this page is to be readable at a glance from across a room,
+   the same reasoning the main clock uses. .timer-mode-segmented reuses
+   .settings-segmented's look (imported from the Settings page) rather
+   than inventing a second segmented-control style. */
+
+.page-timer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(1rem, 3vh, 2rem);
+}
+
+.timer-mode-segmented {
+  width: min(20rem, 70vw);
+}
+
+.timer-view {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(1rem, 3vh, 1.75rem);
+  width: 100%;
+}
+
+.timer-display {
+  font-size: clamp(3.5rem, 16vw, 6.5rem);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+.timer-display.timer-running {
+  color: var(--accent);
+}
+
+.timer-display.timer-done {
+  color: var(--accent-danger);
+  animation: severe-alert-pulse 1s ease-in-out infinite;
+}
+
+.timer-presets {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5em;
+  max-width: 26rem;
+}
+
+.timer-preset-btn {
+  background: var(--surface-elevated);
+  border: 2px solid transparent;
+  border-radius: var(--radius-md);
+  padding: 0.5em 1em;
+  font-family: inherit;
+  font-size: var(--fs-body);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.timer-preset-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.timer-actions {
+  display: flex;
+  gap: 1em;
+}
+
+.timer-secondary-btn {
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+}
+
+.stopwatch-laps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: min(20rem, 70vw);
+  max-height: 9rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 0.3em;
+}
+
+.stopwatch-laps::-webkit-scrollbar {
+  display: none;
+}
+
+.stopwatch-laps li {
+  display: flex;
+  justify-content: space-between;
+  background: var(--surface-elevated);
+  border-radius: var(--radius-md);
+  padding: 0.4em 0.8em;
+  font-size: var(--fs-body);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+/* ---- Bedside Mode ------------------------------------------------------------
+   A summoned view, not one more page to swipe to - outside the pager, one
+   z-index below the alarm-ringing overlay so a ringing alarm still wins
+   over it. Alarm (small) up top, the clock as the one dominant element in
+   the middle, Sound Machine controls anchored at the bottom - see
+   enterBedsideMode()/exitBedsideMode() in script.js. */
+
+.bedside-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: clamp(1.25rem, 3vh, 2.5rem) clamp(1rem, 3vw, 2rem);
+  background: var(--bg);
+}
+
+.bedside-exit-btn {
+  position: absolute;
+  top: clamp(1rem, 2.5vh, 1.5rem);
+  right: clamp(1rem, 2.5vw, 1.5rem);
+}
+
+.bedside-top {
+  flex: none;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.2em;
+  font-size: var(--fs-body-lg);
+  color: var(--text-secondary);
+}
+
+.bedside-top .alarm-inline {
+  margin-top: 0;
+}
+
+.bedside-tomorrow::before {
+  content: "·";
+  margin-right: 1.2em;
+}
+
+.bedside-tomorrow:empty::before {
+  content: none;
+}
+
+.bedside-clock {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(0.3rem, 1vh, 0.6rem);
+}
+
+.bedside-clock .clock-time-huge {
+  font-size: clamp(4rem, 16vw, 7.5rem);
+}
+
+.bedside-clock .clock-date {
+  font-size: var(--fs-body-lg);
+}
+
+.bedside-sound-panel {
+  flex: none;
+  width: 100%;
+  max-width: 32rem;
+}
+
+/* Dimmer than the ordinary night-mode dim (--dimmed below) - Bedside Mode
+   is an explicit "I'm going to sleep now" action, not just "it's dark
+   out". Driven by a custom property (default 50%) so the brightness
+   slider in the overlay can adjust it live - see setBedsideBrightness()
+   in script.js. */
+body.dimmed.bedside-active,
+body.bedside-active {
+  filter: brightness(var(--bedside-brightness, 0.5)) !important;
+}
+
+/* ---- Ambient Mode ------------------------------------------------------------
+   A screensaver-style idle view (see setupAmbientMode() in script.js):
+   huge clock, tiny weather, very dim, the user's photos cycling with a
+   slow crossfade over two stacked layers, or the same twinkling starfield
+   the "Night" weather background uses (see .weather-bg--night::before)
+   if no photos are configured. */
+
+.ambient-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  overflow: hidden;
+  background: #000000;
+}
+
+.ambient-starfield {
+  position: absolute;
+  inset: 0;
+  display: none;
+}
+
+.ambient-starfield.active {
+  display: block;
+  background-image: radial-gradient(circle, rgba(255, 255, 255, 0.8) 1px, transparent 1px),
+    radial-gradient(circle, rgba(255, 255, 255, 0.5) 1px, transparent 1px);
+  background-size: 140px 140px, 90px 90px;
+  background-position: 10px 20px, 60px 80px;
+  animation: bg-star-twinkle 5s ease-in-out infinite;
+}
+
+.ambient-content {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  color: var(--text-primary);
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.6);
+}
+
+.ambient-clock {
+  font-size: clamp(5rem, 20vw, 9rem);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+.ambient-weather {
+  font-size: var(--fs-body-lg);
+  color: var(--text-secondary);
+}
+
+/* Daily Info's hero-tile has no room left for this (confirmed live - it
+   reintroduced the exact overflow bug fixed earlier this session), and
+   Ambient Mode's screensaver has nothing but blank space around the tiny
+   clock/weather anyway - a genuinely better fit for a purely decorative
+   detail like this besides. */
+.ambient-moon {
+  font-size: var(--fs-body);
+  color: var(--text-tertiary);
+  margin-top: 0.3em;
+}
+
+/* Independently dimmable from Bedside Mode's own brightness (idle
+   ambient viewing vs. "going to sleep" are different enough moments that
+   they shouldn't have to share one brightness value). */
+body.dimmed.ambient-active,
+body.ambient-active {
+  filter: brightness(var(--ambient-brightness, 0.6)) !important;
+}
+
+/* ---- Page dots --------------------------------------------------------------
+   Small, low-contrast, fixed at the bottom center over whichever page is
+   showing - a quiet reminder that this is swipeable, and a tap target for
+   jumping to a page without swiping. Deliberately subtle: a bedside
+   display shouldn't have loud UI chrome sitting on top of the clock or
+   the sound controls. */
+
+.page-dots {
+  position: fixed;
+  left: 50%;
+  /* Needs real clearance from the bottom edge, not just a few px - on the
+     actual Echo Show hardware the touchscreen digitizer's active area
+     falls short of the physical bezel, so dots placed too close to the
+     edge render fine but are effectively untappable. Confirmed on-device
+     that the previous ~5-8px offset landed in that dead zone. */
+  bottom: clamp(0.85rem, 2.6vh, 1.3rem);
+  transform: translateX(-50%);
+  display: flex;
+  gap: 0.6rem;
+  z-index: 10;
+}
+
+.page-dot {
+  width: 0.4rem;
+  height: 0.4rem;
+  padding: 0.6rem;
+  margin: -0.6rem;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+}
+
+.page-dot::before {
+  content: "";
+  display: block;
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+  transition: background var(--transition-fast), transform var(--transition-fast);
+}
+
+.page-dot.active::before {
+  background: var(--accent);
+  transform: scale(1.3);
+}
+
+/* ---- Animations ------------------------------------------------------------ */
+
+@keyframes card-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Applied briefly by script.js to any value element whose content just
+   changed, so updates register as a subtle "beat" rather than a jump-cut. */
+@keyframes value-pulse {
+  0% {
+    opacity: 0.35;
+    transform: translateY(-3px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.value-pulse {
+  animation: value-pulse 420ms ease-out;
+}
+
+/* Applied briefly by script.js to the weather icon slot when the condition
+   changes - a scale+fade "pop" stands in for a true shape morph between
+   unrelated icon shapes (sun/cloud/rain/...), which isn't practical here. */
+@keyframes icon-pop {
+  0% {
+    opacity: 0.2;
+    transform: scale(0.7);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.icon-pop {
+  animation: icon-pop 480ms ease-out;
+}
+
+/* ---- Ambient weather backgrounds ------------------------------------------
+   A single fixed layer in front of the pager, like weather happening on
+   the glass in front of the whole display, swapped between 8 CSS-only
+   treatments
+   (sunny, partly cloudy, overcast, fog, rain, snow, storm, night) by
+   setWeatherBackground() in script.js. pointer-events: none keeps it purely
+   visual - taps still reach the cards/buttons underneath regardless of
+   this sitting on top of them. Everything here animates transform/opacity
+   only - no per-frame JS, no repainted geometry - so it stays cheap on the
+   Echo Show's modest hardware. Deliberately below Bedside Mode (z-index
+   50), which already paints an opaque full-screen background above this -
+   "going to sleep" stays visually calm, no rain/snow over it. Ambient
+   Mode (z-index 40) is the opposite call: see the z-index override just
+   below - the same weather effect bleeds through its screensaver too,
+   dimmed by the same body-level brightness filter Ambient Mode already
+   applies to everything else, rather than disappearing behind it. */
+
+.weather-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0.5;
+}
+
+/* Rain and Storm are dense enough (many continuously-falling streak
+   columns, plus Storm's bolts/flash) that sitting in front of the cards
+   like every other condition reads as genuinely obscuring the dashboard,
+   not just "weather on the glass" - the sparser conditions (sun, clouds,
+   fog, snow, stars) never cover enough of the card area at once for that
+   to matter. Dropped below .pager (z-index 1) for just these two, so the
+   streaks/flash still show over the empty wallpaper but not over card
+   content. body.ambient-active below still wins over this via higher
+   specificity - Ambient Mode has no cards to protect. */
+.weather-bg--rain,
+.weather-bg--storm {
+  z-index: 0;
+}
+
+/* Raises the weather effect above .ambient-overlay (z-index 40) only
+   while Ambient Mode is active, so it paints over the screensaver's own
+   photo crossfade/starfield instead of staying hidden behind it. Scoped
+   to body.ambient-active rather than a permanent z-index bump so normal
+   dashboard viewing keeps the weather effect below the Retro CRT theme's
+   scanline overlay (z-index 3), which should always read as the
+   outermost "glass" layer. Opacity boosted too - body.ambient-active
+   already applies its own brightness() filter on top of this (see
+   below), and against a busy photo crossfade the effect all but
+   disappeared at the normal-viewing opacity once both dampen it together. */
+body.ambient-active .weather-bg {
+  z-index: 41;
+  opacity: 0.85;
+}
+
+/* Every condition below is built from real child elements (in DOM/paint
+   order back-to-front: moon, sun, clouds, fog, rain, snow, storm, stars)
+   rather than the old ::before/::after pair - two pseudo-elements per
+   state stopped being enough room once each condition wanted 2-4 depth
+   layers. Each element defaults to hidden here; only the specific
+   .weather-bg--X scope that condition uses flips it to display:block, so
+   an inactive condition's layers cost nothing to paint. .weather-
+   condensation (the frosted-edge vignette) is the one exception - it's
+   handled separately below via its own opacity transition, unchanged
+   from before. */
+.weather-moon-glow,
+.weather-sun-glow,
+.weather-sun-rays,
+.weather-sun-flare,
+.weather-cloud-ceiling,
+.weather-cloud,
+.weather-fog-wash,
+.weather-fog-glow,
+.weather-fog-band,
+.weather-rain-trickle,
+.weather-rain-layer,
+.weather-snow-layer,
+.weather-bolt,
+.weather-flash,
+.weather-stars,
+.weather-shooting-star {
+  display: none;
+  position: absolute;
+}
+
+/* ---- Sunny / Partly Cloudy sun -------------------------------------------- */
+
+.weather-bg--sunny .weather-sun-glow {
+  display: block;
+  top: -18%;
+  right: -14%;
+  width: 58vmax;
+  height: 58vmax;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(255, 246, 219, 0.55) 0%,
+    rgba(255, 205, 120, 0.38) 24%,
+    rgba(255, 183, 77, 0.2) 48%,
+    transparent 72%
+  );
+  animation: bg-sun-breathe 9s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+
+@keyframes bg-sun-breathe {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+  50% {
+    transform: scale(1.06);
+    opacity: 1;
+  }
+}
+
+/* Very slow rotating light rays behind the glow - barely perceptible as
+   motion at any single glance, just a bit of extra life over a static
+   glow. conic-gradient's hard stops read as soft shafts once rotating. */
+.weather-bg--sunny .weather-sun-rays {
+  display: block;
+  top: -32%;
+  right: -30%;
+  width: 78vmax;
+  height: 78vmax;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg, rgba(255, 214, 150, 0.14) 5deg, transparent 16deg,
+    transparent 80deg, rgba(255, 214, 150, 0.11) 90deg, transparent 104deg,
+    transparent 190deg, rgba(255, 214, 150, 0.14) 201deg, transparent 216deg,
+    transparent 285deg, rgba(255, 214, 150, 0.1) 294deg, transparent 307deg,
+    transparent 360deg
+  );
+  animation: bg-sun-rays-rotate 100s linear infinite;
+}
+
+@keyframes bg-sun-rays-rotate {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* A small bright glint offset from the glow's center, pulsing on its own
+   out-of-phase timing - the "lens flare" artifact real sun-facing camera
+   glass would show, the detail that separates a flat glowing circle from
+   something that actually reads as sunlight. */
+.weather-bg--sunny .weather-sun-flare {
+  display: block;
+  top: 8%;
+  right: 24%;
+  width: 3vmax;
+  height: 3vmax;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.85), rgba(255, 224, 168, 0.25) 55%, transparent 78%);
+  filter: blur(1px);
+  animation: bg-sun-flare-pulse 6.5s ease-in-out infinite;
+  animation-delay: -1.8s;
+}
+
+@keyframes bg-sun-flare-pulse {
+  0%, 100% {
+    opacity: 0.2;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 0.65;
+    transform: scale(1.15);
+  }
+}
+
+/* Partly Cloudy's sun: dimmer/smaller than full Sunny, plus a second
+   animation on the same element that dips its brightness right as
+   .weather-cloud-a's own translateX pass brings it in front of the glow's
+   screen position - both share the same 42s duration and are phased so
+   the "dip" window (72%-88%) lines up with the cloud's travel reaching
+   the top-right corner. Not pixel-perfect (that would need JS), but
+   convincing at a glance, which is the actual bar for a bedside display. */
+.weather-bg--partlycloudy .weather-sun-glow {
+  display: block;
+  top: -14%;
+  right: -10%;
+  width: 40vmax;
+  height: 40vmax;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 244, 214, 0.4) 0%, rgba(255, 195, 110, 0.26) 38%, transparent 70%);
+  animation: bg-sun-breathe 9s cubic-bezier(0.45, 0, 0.55, 1) infinite, bg-sun-cloud-shadow 42s linear infinite;
+}
+
+@keyframes bg-sun-cloud-shadow {
+  0%, 64%, 100% {
+    filter: brightness(1);
+  }
+  74% {
+    filter: brightness(0.5);
+  }
+  84% {
+    filter: brightness(0.5);
+  }
+  92% {
+    filter: brightness(1);
+  }
+}
+
+/* ---- Cloud sprite (shared by Overcast + Partly Cloudy) -------------------- */
+
+/* A puffy multi-lobed silhouette built from three overlapping highlight
+   gradients plus one cooler underside shadow, instead of one blurred
+   ellipse - reads as an actual cumulus shape rather than a soft smudge,
+   the same reason real weather-app art never uses a single blob. */
+.weather-cloud {
+  border-radius: 50%;
+  background: radial-gradient(circle at 32% 62%, rgba(255, 255, 255, 0.92), transparent 55%),
+    radial-gradient(circle at 56% 34%, rgba(255, 255, 255, 0.88), transparent 58%),
+    radial-gradient(circle at 76% 58%, rgba(255, 255, 255, 0.82), transparent 52%),
+    radial-gradient(circle at 48% 76%, rgba(190, 202, 218, 0.4), transparent 50%);
+  filter: blur(3px);
+}
+
+@keyframes bg-cloud-drift {
+  from {
+    transform: translateX(-45vmax);
+  }
+  to {
+    transform: translateX(145vw);
+  }
+}
+
+.weather-bg--partlycloudy .weather-cloud-a {
+  display: block;
+  top: 4%;
+  width: 34vmax;
+  height: 12vmax;
+  animation: bg-cloud-drift 42s linear infinite;
+}
+
+/* Overcast: a genuinely unbroken cloud ceiling, not just a few blobs
+   floating over empty sky. .weather-cloud-ceiling is a full-width soft
+   gray wash covering the upper two-thirds of the screen - it establishes
+   "the whole sky is clouded over," with the three puffy .weather-cloud
+   layers on top reading as the visible texture/lumps within that ceiling
+   rather than isolated shapes on nothing. A slow brightness breathe on
+   the ceiling itself suggests shifting cloud thickness overhead - real
+   overcast light isn't a flat constant gray. */
+.weather-cloud-ceiling {
+  top: -10%;
+  left: -10%;
+  width: 120%;
+  height: 75%;
+  background: linear-gradient(
+    180deg,
+    rgba(150, 158, 170, 0.22) 0%,
+    rgba(170, 178, 190, 0.16) 45%,
+    rgba(180, 188, 198, 0.06) 80%,
+    transparent 100%
+  );
+  filter: blur(2px);
+}
+
+.weather-bg--clouds .weather-cloud-ceiling {
+  display: block;
+  animation: bg-cloud-ceiling-breathe 22s ease-in-out infinite;
+}
+
+@keyframes bg-cloud-ceiling-breathe {
+  0%, 100% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Three cloud-sprite layers at different heights/tints/speeds/blur -
+   dimmer, softer and slower the "farther back" a layer sits, the same
+   atmospheric-perspective cue real depth-of-field photography uses. */
+.weather-bg--clouds .weather-cloud-a {
+  display: block;
+  top: 6%;
+  width: 48vmax;
+  height: 17vmax;
+  opacity: 0.85;
+  filter: blur(3px) brightness(0.85) saturate(0.6);
+  animation: bg-cloud-drift 70s linear infinite;
+}
+
+.weather-bg--clouds .weather-cloud-b {
+  display: block;
+  top: 26%;
+  width: 36vmax;
+  height: 13vmax;
+  opacity: 0.68;
+  filter: blur(4px) brightness(0.74) saturate(0.5);
+  animation: bg-cloud-drift 98s linear infinite;
+  animation-delay: -30s;
+}
+
+.weather-bg--clouds .weather-cloud-c {
+  display: block;
+  top: 44%;
+  width: 30vmax;
+  height: 11vmax;
+  opacity: 0.5;
+  filter: blur(5px) brightness(0.65) saturate(0.4);
+  animation: bg-cloud-drift 122s linear infinite;
+  animation-delay: -80s;
+}
+
+/* ---- Fog ---------------------------------------------------------------
+   Four layers, not just drifting bands: a full-screen milky wash
+   establishes "visibility is genuinely reduced" everywhere at once, a
+   heavily-blurred, near-colorless glow suggests a weak sun struggling to
+   break through from behind the murk, and four wisp bands - each its own
+   skew angle, width, blur and speed - drift past for texture. Skew is
+   baked into each band's own keyframe (a static transform property gets
+   fully overridden once an animation owns the transform channel), so
+   each wisp drifts at a slightly different tilt instead of every band
+   sharing one uniform horizontal stripe angle. */
+
+.weather-fog-wash {
+  inset: 0;
+  background: radial-gradient(
+    ellipse at 50% 40%,
+    rgba(215, 220, 226, 0.22) 0%,
+    rgba(200, 206, 214, 0.14) 55%,
+    rgba(190, 197, 206, 0.08) 100%
+  );
+}
+
+.weather-bg--fog .weather-fog-wash {
+  display: block;
+  animation: bg-fog-wash-breathe 14s ease-in-out infinite;
+}
+
+@keyframes bg-fog-wash-breathe {
+  0%, 100% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.weather-fog-glow {
+  top: -15%;
+  left: 18%;
+  width: 46vmax;
+  height: 46vmax;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(232, 232, 224, 0.16), transparent 68%);
+  filter: blur(6px);
+}
+
+.weather-bg--fog .weather-fog-glow {
+  display: block;
+  animation: bg-fog-glow-pulse 16s ease-in-out infinite;
+}
+
+@keyframes bg-fog-glow-pulse {
+  0%, 100% {
+    opacity: 0.4;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.85;
+    transform: scale(1.08);
+  }
+}
+
+@keyframes bg-fog-drift-a {
+  0%, 100% {
+    transform: skewY(-3deg) translateX(-9%);
+  }
+  50% {
+    transform: skewY(-3deg) translateX(9%);
+  }
+}
+
+@keyframes bg-fog-drift-b {
+  0%, 100% {
+    transform: skewY(2deg) translateX(9%);
+  }
+  50% {
+    transform: skewY(2deg) translateX(-8%);
+  }
+}
+
+@keyframes bg-fog-drift-c {
+  0%, 100% {
+    transform: skewY(-1.5deg) translateX(-7%);
+  }
+  50% {
+    transform: skewY(-1.5deg) translateX(8%);
+  }
+}
+
+@keyframes bg-fog-drift-d {
+  0%, 100% {
+    transform: skewY(4deg) translateX(8%);
+  }
+  50% {
+    transform: skewY(4deg) translateX(-9%);
+  }
+}
+
+.weather-bg--fog .weather-fog-a {
+  display: block;
+  left: -20%;
+  top: 8%;
+  width: 140%;
+  height: 15vmax;
+  border-radius: 50%;
+  background: linear-gradient(90deg, transparent, rgba(225, 230, 235, 0.55), transparent);
+  filter: blur(4px);
+  opacity: 0.7;
+  animation: bg-fog-drift-a 24s ease-in-out infinite;
+}
+
+.weather-bg--fog .weather-fog-b {
+  display: block;
+  left: -20%;
+  top: 34%;
+  width: 140%;
+  height: 19vmax;
+  border-radius: 50%;
+  background: linear-gradient(90deg, transparent, rgba(225, 230, 235, 0.62), transparent);
+  filter: blur(4px);
+  opacity: 0.88;
+  animation: bg-fog-drift-b 31s ease-in-out infinite;
+}
+
+.weather-bg--fog .weather-fog-c {
+  display: block;
+  left: -20%;
+  top: 58%;
+  width: 140%;
+  height: 17vmax;
+  border-radius: 50%;
+  background: linear-gradient(90deg, transparent, rgba(225, 230, 235, 0.6), transparent);
+  filter: blur(5px);
+  opacity: 0.72;
+  animation: bg-fog-drift-c 38s ease-in-out infinite;
+  animation-delay: -12s;
+}
+
+.weather-bg--fog .weather-fog-d {
+  display: block;
+  left: -20%;
+  top: 80%;
+  width: 140%;
+  height: 14vmax;
+  border-radius: 50%;
+  background: linear-gradient(90deg, transparent, rgba(225, 230, 235, 0.5), transparent);
+  filter: blur(5px);
+  opacity: 0.6;
+  animation: bg-fog-drift-d 45s ease-in-out infinite;
+  animation-delay: -20s;
+}
+
+/* ---- Rain (also reused, heavier, by Storm below) --------------------------
+   Three layers, back to front: a slow "trickle" of a few individual
+   rivulets running down the glass (bigger, softer, far slower than the
+   falling rain), then two fast falling-streak layers at different
+   sizes/speeds for depth - bigger drops genuinely do fall faster than
+   fine ones.
+
+   Each "drop" is its own linear-gradient layer (not a radial-gradient
+   blob) specifically because a radial-gradient is radially symmetric -
+   it cannot have a brighter leading edge and a fading trailing streak,
+   which reads as a soft dot bobbing rather than a drop actually falling.
+   linear-gradient(180deg, ...) has a real top-to-bottom direction: each
+   streak fades in slowly (the motion-blurred trail) and peaks sharply
+   near the bottom of its own tile (the drop's leading edge), then cuts
+   to transparent - the same silhouette real falling-rain art uses. Since
+   every drop-column now needs its own background-size/position (a
+   linear-gradient can't be confined to a narrow column the way a single
+   shared background-position could with the old radial approach), the
+   fall animation drives a comma-matched list of background-position
+   values, one per column, instead of one shared pair - more moving
+   parts, but it's what genuine directionality costs. Still nothing but
+   background-position animating - cheap on the Echo Show's GPU.
+
+   Column x-positions are hand-scattered, not evenly spaced (the first
+   pass used 8/27/49/68/88% - equal ~20-point gaps, which reads as "a row
+   of drops" the same way a small regular tile read as "a grid" for snow/
+   stars). Each column also gets its own tile height/width instead of
+   sharing one - real rain doesn't fall in lockstep-sized drops either. */
+
+.weather-rain-trickle {
+  inset: -10% 0;
+  background-image: linear-gradient(
+      180deg,
+      transparent 0%,
+      rgba(200, 222, 248, 0.03) 24%,
+      rgba(200, 222, 248, 0.22) 61%,
+      rgba(200, 222, 248, 0.5) 92%,
+      rgba(200, 222, 248, 0.58) 97%,
+      transparent 100%
+    ),
+    linear-gradient(
+      180deg,
+      transparent 0%,
+      rgba(200, 222, 248, 0.02) 31%,
+      rgba(200, 222, 248, 0.16) 66%,
+      rgba(200, 222, 248, 0.4) 93%,
+      rgba(200, 222, 248, 0.46) 97%,
+      transparent 100%
+    ),
+    linear-gradient(
+      180deg,
+      transparent 0%,
+      rgba(200, 222, 248, 0.03) 19%,
+      rgba(200, 222, 248, 0.24) 59%,
+      rgba(200, 222, 248, 0.46) 91%,
+      rgba(200, 222, 248, 0.52) 97%,
+      transparent 100%
+    ),
+    linear-gradient(
+      180deg,
+      transparent 0%,
+      rgba(200, 222, 248, 0.02) 27%,
+      rgba(200, 222, 248, 0.14) 63%,
+      rgba(200, 222, 248, 0.34) 93%,
+      rgba(200, 222, 248, 0.4) 97%,
+      transparent 100%
+    ),
+    linear-gradient(
+      180deg,
+      transparent 0%,
+      rgba(200, 222, 248, 0.03) 22%,
+      rgba(200, 222, 248, 0.2) 60%,
+      rgba(200, 222, 248, 0.44) 92%,
+      rgba(200, 222, 248, 0.5) 97%,
+      transparent 100%
+    );
+  background-repeat: repeat-y;
+  background-size: 3px 480px, 2px 400px, 3.5px 540px, 2.5px 420px, 3px 470px;
+  background-position: 9% 0, 24% 0, 47% 0, 68% 0, 91% 0;
+  filter: blur(0.5px);
+}
+
+@keyframes bg-rain-trickle-crawl {
+  from {
+    background-position: 9% -480px, 24% -400px, 47% -540px, 68% -420px, 91% -470px;
+  }
+  to {
+    background-position: 9% 0, 24% 0, 47% 0, 68% 0, 91% 0;
+  }
+}
+
+.weather-bg--rain .weather-rain-trickle,
+.weather-bg--storm .weather-rain-trickle {
+  display: block;
+  animation: bg-rain-trickle-crawl 3.4s linear infinite;
+}
+
+.weather-rain-far {
+  inset: -15% 0;
+  background-repeat: repeat-y;
+  background-image: linear-gradient(
+      180deg,
+      transparent 0%,
+      rgba(210, 227, 252, 0.04) 19%,
+      rgba(210, 227, 252, 0.3) 57%,
+      rgba(210, 227, 252, 0.78) 89%,
+      rgba(210, 227, 252, 0.85) 95%,
+      transparent 100%
+    ),
+    linear-gradient(
+      180deg,
+      transparent 0%,
+      rgba(210, 227, 252, 0.03) 23%,
+      rgba(210, 227, 252, 0.22) 61%,
+      rgba(210, 227, 252, 0.6) 90%,
+      rgba(210, 227, 252, 0.68) 95%,
+      transparent 100%
+    ),
+    linear-gradient(
+      180deg,
+      transparent 0%,
+      rgba(210, 227, 252, 0.04) 17%,
+      rgba(210, 227, 252, 0.28) 56%,
+      rgba(210, 227, 252, 0.74) 89%,
+      rgba(210, 227, 252, 0.8) 95%,
+      transparent 100%
+    ),
+    linear-gradient(
+      180deg,
+      transparent 0%,
+      rgba(210, 227, 252, 0.03) 25%,
+      rgba(210, 227, 252, 0.2) 62%,
+      rgba(210, 227, 252, 0.58) 91%,
+      rgba(210, 227, 252, 0.64) 95%,
+      transparent 100%
+    ),
+    linear-gradient(
+      180deg,
+      transparent 0%,
+      rgba(210, 227, 252, 0.04) 20%,
+      rgba(210, 227, 252, 0.26) 58%,
+      rgba(210, 227, 252, 0.7) 89%,
+      rgba(210, 227, 252, 0.76) 95%,
+      transparent 100%
+    ),
+    linear-gradient(
+      180deg,
+      transparent 0%,
+      rgba(210, 227, 252, 0.03) 21%,
+      rgba(210, 227, 252, 0.18) 59%,
+      rgba(210, 227, 252, 0.54) 90%,
+      rgba(210, 227, 252, 0.6) 95%,
+      transparent 100%
+    ),
+    linear-gradient(
+      180deg,
+      transparent 0%,
+      rgba(210, 227, 252, 0.04) 18%,
+      rgba(210, 227, 252, 0.32) 58%,
+      rgba(210, 227, 252, 0.82) 89%,
+      rgba(210, 227, 252, 0.88) 95%,
+      transparent 100%
+    );
+  background-size: 2px 120px, 1.5px 145px, 2.2px 110px, 1.6px 135px, 2px 125px, 1.4px 150px, 2.3px 118px;
+  background-position: 4% 0, 16% 0, 28% 0, 43% 0, 59% 0, 74% 0, 89% 0;
+}
+
+@keyframes bg-raindrops-fall {
+  from {
+    background-position: 4% -120px, 16% -145px, 28% -110px, 43% -135px, 59% -125px, 74% -150px, 89% -118px;
+  }
+  to {
+    background-position: 4% 0, 16% 0, 28% 0, 43% 0, 59% 0, 74% 0, 89% 0;
+  }
+}
+
+.weather-bg--rain .weather-rain-far {
+  display: block;
+  animation: bg-raindrops-fall 0.85s linear infinite;
+}
+
+.weather-rain-near {
+  inset: -15% 0;
+  background-repeat: repeat-y;
+  background-image: linear-gradient(
+      180deg,
+      transparent 0%,
+      rgba(220, 235, 255, 0.03) 23%,
+      rgba(220, 235, 255, 0.18) 59%,
+      rgba(220, 235, 255, 0.52) 89%,
+      rgba(220, 235, 255, 0.58) 95%,
+      transparent 100%
+    ),
+    linear-gradient(
+      180deg,
+      transparent 0%,
+      rgba(220, 235, 255, 0.03) 27%,
+      rgba(220, 235, 255, 0.16) 62%,
+      rgba(220, 235, 255, 0.48) 90%,
+      rgba(220, 235, 255, 0.53) 95%,
+      transparent 100%
+    ),
+    linear-gradient(
+      180deg,
+      transparent 0%,
+      rgba(220, 235, 255, 0.03) 20%,
+      rgba(220, 235, 255, 0.2) 58%,
+      rgba(220, 235, 255, 0.56) 89%,
+      rgba(220, 235, 255, 0.62) 95%,
+      transparent 100%
+    ),
+    linear-gradient(
+      180deg,
+      transparent 0%,
+      rgba(220, 235, 255, 0.03) 29%,
+      rgba(220, 235, 255, 0.14) 63%,
+      rgba(220, 235, 255, 0.44) 91%,
+      rgba(220, 235, 255, 0.49) 95%,
+      transparent 100%
+    );
+  background-size: 2.8px 200px, 2.3px 175px, 3px 210px, 2.5px 185px;
+  background-position: 12% 0, 38% 0, 66% 0, 85% 0;
+}
+
+@keyframes bg-raindrops-fall-near {
+  from {
+    background-position: 12% -200px, 38% -175px, 66% -210px, 85% -185px;
+  }
+  to {
+    background-position: 12% 0, 38% 0, 66% 0, 85% 0;
+  }
+}
+
+.weather-bg--rain .weather-rain-near {
+  display: block;
+  animation: bg-raindrops-fall-near 0.65s linear infinite;
+}
+
+/* Storm's rain reuses the same two layers, just faster and skewed - a
+   visible wind slant that plain calm Rain doesn't have, so a storm reads
+   as heavier weather rather than just "rain with a flash added". The
+   skew has to live inside the keyframe (see bg-raindrops-fall-storm-*)
+   rather than as a separate static transform, since the fall animation
+   already owns the transform-adjacent background-position channel and,
+   more importantly, any animated property fully replaces a same-named
+   static declaration once it's running - a bare `transform: skewX()`
+   here would just be inert. */
+@keyframes bg-raindrops-fall-storm-far {
+  from {
+    background-position: 4% -120px, 16% -145px, 28% -110px, 43% -135px, 59% -125px, 74% -150px, 89% -118px;
+    transform: skewX(-9deg);
+  }
+  to {
+    background-position: 4% 0, 16% 0, 28% 0, 43% 0, 59% 0, 74% 0, 89% 0;
+    transform: skewX(-9deg);
+  }
+}
+
+@keyframes bg-raindrops-fall-storm-near {
+  from {
+    background-position: 12% -200px, 38% -175px, 66% -210px, 85% -185px;
+    transform: skewX(-9deg);
+  }
+  to {
+    background-position: 12% 0, 38% 0, 66% 0, 85% 0;
+    transform: skewX(-9deg);
+  }
+}
+
+.weather-bg--storm .weather-rain-far {
+  display: block;
+  animation: bg-raindrops-fall-storm-far 0.6s linear infinite;
+}
+
+.weather-bg--storm .weather-rain-near {
+  display: block;
+  animation: bg-raindrops-fall-storm-near 0.45s linear infinite;
+}
+
+/* ---- Snow ------------------------------------------------------------------
+   Three drift layers (far/mid/near) instead of two - farther layers are
+   smaller, dimmer, softer-blurred and slower; the nearest layer gets a
+   soft drop-shadow bloom so its flakes read as glowing rather than flat
+   dots, real atmospheric-perspective + light-emission cues rather than
+   just "more dots". Each keyframe's total travel is a multiple of its own
+   tile size so the loop point is seamless. */
+
+@keyframes bg-snow-drift-far {
+  0% {
+    transform: translate(0, 0);
+  }
+  20% {
+    transform: translate(10px, 48px);
+  }
+  40% {
+    transform: translate(-8px, 96px);
+  }
+  60% {
+    transform: translate(12px, 144px);
+  }
+  80% {
+    transform: translate(-6px, 192px);
+  }
+  100% {
+    transform: translate(0, 240px);
+  }
+}
+
+@keyframes bg-snow-drift-near {
+  0% {
+    transform: translate(0, 0);
+  }
+  25% {
+    transform: translate(-14px, 67px);
+  }
+  50% {
+    transform: translate(10px, 135px);
+  }
+  75% {
+    transform: translate(-8px, 202px);
+  }
+  100% {
+    transform: translate(0, 270px);
+  }
+}
+
+/* Each layer's flakes are hand-scattered points within one large tile
+   (340px/300px/260px) rather than a small tile with one dot per cell -
+   a small regular tile reads as an obvious grid the instant it repeats,
+   no matter how the drift animates it, since every row/column lines up
+   with its neighbor. Scattering several irregular points inside a much
+   bigger tile pushes the repeat far enough apart, and breaks the
+   row/column alignment within it, that the eye reads "falling snow"
+   instead of "a moving grid of dots". */
+.weather-bg--snow .weather-snow-far {
+  display: block;
+  inset: -10%;
+  background-image: radial-gradient(circle 1px at 7% 18%, rgba(255, 255, 255, 0.32), transparent),
+    radial-gradient(circle 1px at 32% 61%, rgba(255, 255, 255, 0.26), transparent),
+    radial-gradient(circle 1px at 54% 12%, rgba(255, 255, 255, 0.3), transparent),
+    radial-gradient(circle 1px at 71% 74%, rgba(255, 255, 255, 0.24), transparent),
+    radial-gradient(circle 1px at 89% 41%, rgba(255, 255, 255, 0.28), transparent),
+    radial-gradient(circle 1px at 18% 89%, rgba(255, 255, 255, 0.22), transparent),
+    radial-gradient(circle 1px at 45% 46%, rgba(255, 255, 255, 0.27), transparent),
+    radial-gradient(circle 1px at 96% 8%, rgba(255, 255, 255, 0.3), transparent);
+  background-size: 340px 340px;
+  filter: blur(0.4px);
+  animation: bg-snow-drift-far 17s linear infinite;
+}
+
+.weather-bg--snow .weather-snow-mid {
+  display: block;
+  inset: -10%;
+  background-image: radial-gradient(circle 1.5px at 11% 24%, rgba(255, 255, 255, 0.6), transparent),
+    radial-gradient(circle 1px at 29% 8%, rgba(255, 255, 255, 0.4), transparent),
+    radial-gradient(circle 1.5px at 47% 55%, rgba(255, 255, 255, 0.55), transparent),
+    radial-gradient(circle 1px at 63% 33%, rgba(255, 255, 255, 0.38), transparent),
+    radial-gradient(circle 1.5px at 78% 71%, rgba(255, 255, 255, 0.58), transparent),
+    radial-gradient(circle 1px at 15% 82%, rgba(255, 255, 255, 0.36), transparent),
+    radial-gradient(circle 1.5px at 91% 19%, rgba(255, 255, 255, 0.52), transparent),
+    radial-gradient(circle 1px at 38% 92%, rgba(255, 255, 255, 0.34), transparent),
+    radial-gradient(circle 1.5px at 58% 12%, rgba(255, 255, 255, 0.5), transparent),
+    radial-gradient(circle 1px at 84% 48%, rgba(255, 255, 255, 0.4), transparent);
+  background-size: 260px 260px;
+  animation: bg-snow-drift-far 12s linear infinite;
+  animation-delay: -4s;
+}
+
+.weather-bg--snow .weather-snow-near {
+  display: block;
+  inset: -10%;
+  background-image: radial-gradient(circle 2.2px at 16% 28%, rgba(255, 255, 255, 0.88), transparent),
+    radial-gradient(circle 2px at 44% 64%, rgba(255, 255, 255, 0.8), transparent),
+    radial-gradient(circle 2.2px at 68% 15%, rgba(255, 255, 255, 0.85), transparent),
+    radial-gradient(circle 2px at 85% 55%, rgba(255, 255, 255, 0.78), transparent),
+    radial-gradient(circle 2.2px at 27% 85%, rgba(255, 255, 255, 0.82), transparent),
+    radial-gradient(circle 2px at 58% 42%, rgba(255, 255, 255, 0.75), transparent);
+  background-size: 300px 300px;
+  filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.55));
+  animation: bg-snow-drift-near 8s linear infinite;
+}
+
+/* ---- Storm: lightning ------------------------------------------------------
+   Two independent bolts on different, unsynced durations (7s and 11s) so
+   strikes feel irregular rather than metronomic - real storms don't flash
+   on a fixed beat. Bolt A's strike window is timed to the ambient
+   full-screen flash below (both hit their peak around the 92-94% mark of
+   the same 7s cycle - the bolt reads as the strike itself, the flash as
+   the light hitting the room). Bolt B is unsynced and dimmer, an
+   occasional distant second strike with no matching whiteout. */
+
+.weather-bolt {
+  width: 8vmax;
+  opacity: 0;
+  filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.75));
+  clip-path: polygon(60% 0%, 30% 45%, 50% 45%, 20% 100%, 70% 55%, 50% 55%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(220, 230, 255, 0.55));
+}
+
+@keyframes bg-bolt-strike {
+  0%, 91%, 100% {
+    opacity: 0;
+  }
+  92% {
+    opacity: 0.9;
+  }
+  92.6% {
+    opacity: 0.15;
+  }
+  93.2% {
+    opacity: 0.75;
+  }
+  94% {
+    opacity: 0;
+  }
+}
+
+.weather-bg--storm .weather-bolt-a {
+  display: block;
+  top: 2%;
+  left: 23%;
+  height: 44vmax;
+  animation: bg-bolt-strike 7s ease-in-out infinite;
+}
+
+.weather-bg--storm .weather-bolt-b {
+  display: block;
+  top: 4%;
+  left: 66%;
+  height: 34vmax;
+  width: 7vmax;
+  opacity: 0;
+  transform: scaleX(-1);
+  animation: bg-bolt-strike 11s ease-in-out infinite;
+  animation-delay: -3.4s;
+}
+
+.weather-flash {
+  inset: 0;
+  background: rgba(255, 255, 255, 0.9);
+  opacity: 0;
+}
+
+.weather-bg--storm .weather-flash {
+  display: block;
+  animation: bg-storm-flash 7s ease-in-out infinite;
+}
+
+@keyframes bg-storm-flash {
+  0%, 92%, 100% {
+    opacity: 0;
+  }
+  93% {
+    opacity: 0.45;
+  }
+  94% {
+    opacity: 0.05;
+  }
+  95% {
+    opacity: 0.3;
+  }
+  96% {
+    opacity: 0;
+  }
+}
+
+/* ---- Night -------------------------------------------------------------- */
+
+.weather-moon-glow {
+  top: -10%;
+  right: 4%;
+  width: 20vmax;
+  height: 20vmax;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(235, 240, 250, 0.5) 0%, rgba(210, 220, 240, 0.22) 42%, transparent 72%);
+}
+
+.weather-bg--night .weather-moon-glow {
+  display: block;
+  animation: bg-moon-breathe 12s ease-in-out infinite;
+}
+
+@keyframes bg-moon-breathe {
+  0%, 100% {
+    opacity: 0.7;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.04);
+  }
+}
+
+.weather-stars {
+  inset: 0;
+}
+
+@keyframes bg-star-twinkle {
+  0%, 100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Every star is its own hand-placed point within one large tile, the
+   same reasoning as the snow layers above - a small regular tile with
+   one dot per cell reads as a moving grid the moment it repeats. Two
+   colors mixed in (cool white + a faint warm tint) - real starlight
+   isn't monochrome, and a sky that's all one color of dot reads as more
+   artificial than one with a little variation.
+
+   Six layers, not three - each on its own twinkle duration/delay, so the
+   sky reads as individually-flickering stars rather than 2-3 clusters
+   blinking in unison. A single background-image can only animate one
+   opacity for every dot it contains, so more independent-feeling twinkle
+   means more layers, each with fewer stars - the same star count as
+   before, just split six ways instead of three. */
+.weather-bg--night .weather-stars-a {
+  display: block;
+  background-image: radial-gradient(circle 1px at 6% 22%, rgba(255, 255, 255, 0.85), transparent),
+    radial-gradient(circle 1px at 41% 48%, rgba(255, 244, 220, 0.55), transparent),
+    radial-gradient(circle 1px at 76% 58%, rgba(255, 255, 255, 0.7), transparent),
+    radial-gradient(circle 1px at 12% 91%, rgba(255, 255, 255, 0.65), transparent);
+  background-size: 280px 280px;
+  animation: bg-star-twinkle 5s ease-in-out infinite;
+}
+
+.weather-bg--night .weather-stars-b {
+  display: block;
+  background-image: radial-gradient(circle 1px at 19% 63%, rgba(255, 244, 220, 0.6), transparent),
+    radial-gradient(circle 1px at 57% 78%, rgba(255, 255, 255, 0.8), transparent),
+    radial-gradient(circle 1px at 88% 14%, rgba(255, 244, 220, 0.6), transparent),
+    radial-gradient(circle 1px at 48% 92%, rgba(255, 244, 220, 0.5), transparent);
+  background-size: 280px 280px;
+  animation: bg-star-twinkle 5.4s ease-in-out infinite;
+  animation-delay: -1.7s;
+}
+
+.weather-bg--night .weather-stars-c {
+  display: block;
+  background-image: radial-gradient(circle 1px at 33% 9%, rgba(255, 255, 255, 0.75), transparent),
+    radial-gradient(circle 1px at 64% 27%, rgba(255, 244, 220, 0.5), transparent),
+    radial-gradient(circle 1px at 93% 68%, rgba(255, 255, 255, 0.78), transparent),
+    radial-gradient(circle 1px at 81% 88%, rgba(255, 255, 255, 0.7), transparent);
+  background-size: 280px 280px;
+  animation: bg-star-twinkle 4.6s ease-in-out infinite;
+  animation-delay: -3.1s;
+}
+
+.weather-bg--night .weather-stars-d {
+  display: block;
+  background-image: radial-gradient(circle 1px at 14% 37%, rgba(210, 225, 255, 0.7), transparent),
+    radial-gradient(circle 1px at 46% 16%, rgba(210, 225, 255, 0.65), transparent),
+    radial-gradient(circle 1px at 74% 84%, rgba(210, 225, 255, 0.68), transparent),
+    radial-gradient(circle 1px at 95% 66%, rgba(210, 225, 255, 0.62), transparent);
+  background-size: 240px 240px;
+  animation: bg-star-twinkle 5.2s ease-in-out infinite;
+  animation-delay: -0.8s;
+}
+
+.weather-bg--night .weather-stars-e {
+  display: block;
+  background-image: radial-gradient(circle 1px at 28% 71%, rgba(210, 225, 255, 0.55), transparent),
+    radial-gradient(circle 1px at 62% 54%, rgba(210, 225, 255, 0.6), transparent),
+    radial-gradient(circle 1px at 85% 29%, rgba(210, 225, 255, 0.58), transparent),
+    radial-gradient(circle 1px at 5% 78%, rgba(210, 225, 255, 0.5), transparent);
+  background-size: 240px 240px;
+  animation: bg-star-twinkle 4.8s ease-in-out infinite;
+  animation-delay: -2.4s;
+}
+
+/* Sparser, bigger, brighter "hero" stars read as closer against the
+   other five layers' fainter backdrop. */
+.weather-bg--night .weather-stars-f {
+  display: block;
+  background-image: radial-gradient(circle 1.4px at 22% 31%, rgba(255, 255, 255, 0.92), transparent),
+    radial-gradient(circle 1.4px at 51% 68%, rgba(255, 255, 255, 0.85), transparent),
+    radial-gradient(circle 1.4px at 79% 22%, rgba(255, 255, 255, 0.9), transparent),
+    radial-gradient(circle 1.4px at 91% 77%, rgba(255, 255, 255, 0.82), transparent),
+    radial-gradient(circle 1.4px at 12% 84%, rgba(255, 255, 255, 0.78), transparent);
+  background-size: 360px 360px;
+  animation: bg-star-twinkle 4s ease-in-out infinite;
+  animation-delay: -1.1s;
+}
+
+/* A rare shooting star - a thin gradient streak, pre-rotated to a fixed
+   diagonal and animated only via translateX along that same rotated
+   axis, so the motion stays a clean straight line without needing
+   per-frame JS to compute an angle. Visible for roughly half a second
+   once every 22s - a bedside display should surprise you occasionally,
+   not put on a show. */
+.weather-shooting-star {
+  top: 14%;
+  left: 4%;
+  width: 90px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.95) 70%, #fff);
+  opacity: 0;
+}
+
+.weather-bg--night .weather-shooting-star {
+  display: block;
+  animation: bg-shooting-star 22s linear infinite;
+}
+
+@keyframes bg-shooting-star {
+  0%, 90%, 100% {
+    opacity: 0;
+    transform: rotate(-24deg) translateX(0);
+  }
+  90.4% {
+    opacity: 1;
+    transform: rotate(-24deg) translateX(0);
+  }
+  93% {
+    opacity: 1;
+    transform: rotate(-24deg) translateX(42vw);
+  }
+  93.6% {
+    opacity: 0;
+    transform: rotate(-24deg) translateX(46vw);
+  }
+}
+
+/* A faint frosted vignette at the screen edges - cold/wet conditions
+   only (rain, storm, snow, night). Static gradient + a fixed blur value,
+   not backdrop-filter - it never re-samples whatever's underneath, so it
+   costs nothing per frame despite sitting above the animated rain/snow
+   layers. Only opacity ever transitions, and only on the rare occasion
+   the weather condition itself changes. */
+.weather-condensation {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 2.5s ease;
+  background: radial-gradient(
+    ellipse at center,
+    transparent 52%,
+    rgba(210, 226, 242, 0.16) 80%,
+    rgba(210, 226, 242, 0.38) 100%
+  );
+  filter: blur(4px);
+}
+
+.weather-bg--rain .weather-condensation,
+.weather-bg--storm .weather-condensation,
+.weather-bg--snow .weather-condensation,
+.weather-bg--fog .weather-condensation,
+.weather-bg--night .weather-condensation {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* ---- Responsive fallbacks ----------------------------------------------------
+   The 960x480 kiosk is the primary target, but this should still hold up
+   in a normal browser window or a taller/narrower panel.
+
+   Threshold note: the Echo Show's kiosk browser applies its own ~0.82x
+   page scale, so its *effective* CSS viewport is roughly 787x393, not the
+   physical 960x480 - measured directly via the WebView's remote-debugging
+   protocol. An earlier 820px breakpoint here was wider than that effective
+   viewport, so this "narrow screen" fallback was silently activating on
+   the primary target device itself, collapsing .card-row's flex:1 to
+   flex:none and pushing the third card row off-screen. 600px stays safely
+   under 787px while still catching genuinely narrow/portrait displays. */
+
+@media (max-width: 600px), (max-aspect-ratio: 4/3) {
+  .page {
+    height: auto;
+    min-height: 100vh;
+  }
+
+  .page-overview {
+    grid-template-columns: 1fr;
+    /* Stacked single column: hero-panel then card-grid, each on their own
+       row instead of sharing one side by side. The alert/sticky-note
+       banners aren't part of this grid at all any more (see
+       .overview-banners) - they float the same way regardless of width. */
+    grid-template-rows: auto 1fr;
+  }
+
+  .hero-panel {
+    grid-column: 1;
+    grid-row: 1;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .card-grid {
+    grid-column: 1;
+    grid-row: 2;
+    height: auto;
+  }
+
+  .card-row {
+    flex: none;
+  }
+
+  .page-body-split {
+    height: auto;
+    flex-direction: column;
+  }
+
+  .panel {
+    flex: none;
+  }
+
+  html,
+  body {
+    overflow: auto;
+  }
+}
+
+@media (max-width: 480px) {
+  .card-row {
+    flex-direction: column;
+  }
+}
+
+/* ---- Agenda week-view add form -------------------------------------------
+   The Agenda is manually kept now (no calendar sync to source from) - this
+   is the add form living right above the day-by-day list it edits, same
+   popover the calendar icon already opened. */
+
+.week-view-add-row {
+  flex: none;
+  display: flex;
+  gap: 0.5em;
+  margin-bottom: 0.5em;
+}
+
+.week-view-add-row .settings-text-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.week-view-event-title {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+.week-view-event-remove {
+  flex: none;
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  font-size: var(--fs-body);
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.1em 0.3em;
+}
+
+/* ---- Daily quote ----------------------------------------------------------
+   The briefing's closing line - a deterministic pick from a small local
+   list (see DAILY_QUOTES in script.js), never a network fetch, so it's the
+   one line in the briefing guaranteed to never be blank. Set apart from
+   the weather/agenda lines above it with a little breathing room and a
+   quieter, italic voice - it's texture, not information. */
+
+.briefing-quote {
+  margin-top: 0.3em;
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
+/* ---- World Clock ------------------------------------------------------
+   An optional Overview tile (off by default - see DEFAULT_TILE_LAYOUT in
+   script.js) plus its Settings-page management list. Pure localStorage/
+   Intl, no network. */
+
+.card-worldclock .card-body,
+.worldclock-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35em;
+  overflow-y: auto;
+}
+
+.worldclock-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6em;
+  font-size: var(--fs-body);
+}
+
+.worldclock-label {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worldclock-time {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.worldclock-empty {
+  font-size: var(--fs-caption);
+  color: var(--text-tertiary);
+}
+
+.settings-worldclock-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
+  margin-bottom: 0.6em;
+}
+
+/* ---- Moon phase visual -----------------------------------------------
+   A real rendered crescent/gibbous shape instead of just the emoji label
+   (see renderMoonPhaseVisual() in script.js) - the classic two-
+   overlapping-circles trick: a lit disc (::before) plus a "terminator"
+   disc (::after) offset/sized per phase to occlude exactly the right
+   fraction of it. Eight phase classes swap the terminator's position/size;
+   New and Full are pure box-shadow special cases (the terminator disc
+   can't express "fully dark" or "fully lit" through simple offset alone). */
+
+.moon-visual {
+  position: relative;
+  display: inline-block;
+  width: 1.6em;
+  height: 1.6em;
+  border-radius: 50%;
+  background: #e8e4d8;
+  overflow: hidden;
+  flex: none;
+}
+
+.moon-visual-small {
+  width: 1.1em;
+  height: 1.1em;
+}
+
+.moon-visual::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: #10131a;
+}
+
+.moon-visual--phase-0 {
+  /* New Moon - fully dark. */
+  background: #10131a;
+  box-shadow: inset 0 0 0 1px var(--divider);
+}
+.moon-visual--phase-0::after {
+  display: none;
+}
+
+.moon-visual--phase-1::after {
+  /* Waxing Crescent - mostly dark, thin lit sliver on the right. */
+  transform: translateX(-18%) scale(1.05);
+}
+
+.moon-visual--phase-2::after {
+  /* First Quarter - half dark (left half). */
+  clip-path: inset(0 50% 0 0);
+}
+
+.moon-visual--phase-3::after {
+  /* Waxing Gibbous - mostly lit, thin dark sliver on the left. */
+  transform: translateX(-62%) scale(1.05);
+}
+
+.moon-visual--phase-4 {
+  /* Full Moon - fully lit. */
+}
+.moon-visual--phase-4::after {
+  display: none;
+}
+
+.moon-visual--phase-5::after {
+  /* Waning Gibbous - mostly lit, thin dark sliver on the right. */
+  transform: translateX(62%) scale(1.05);
+}
+
+.moon-visual--phase-6::after {
+  /* Last Quarter - half dark (right half). */
+  clip-path: inset(0 0 0 50%);
+}
+
+.moon-visual--phase-7::after {
+  /* Waning Crescent - mostly dark, thin lit sliver on the left. */
+  transform: translateX(18%) scale(1.05);
+}
+
+.weather-moon-row {
+  gap: 0.5em;
+}
+
+.ambient-moon-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4em;
+}
+
+/* ---- Today in History ------------------------------------------------
+   Daily Info page only - Wikipedia's public "on this day" feed (see
+   loadTodayInHistory() in script.js). Hidden entirely on a failed fetch
+   rather than showing an empty panel - this is decoration, not core
+   information, so it should simply not exist on a bad day rather than
+   look broken. */
+
+.panel-history {
+  overflow-y: auto;
+}
+
+.history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+}
+
+.history-item {
+  font-size: var(--fs-caption);
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.history-item b {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  margin-right: 0.4em;
+}
+
+/* ---- Breathing Mode ----------------------------------------------------
+   A full-screen guided inhale/hold/exhale/hold exercise - the same
+   "summoned overlay, not a page" shape Bedside/Ambient Mode use (see
+   enterBreathingMode() in script.js). The circle's scale is driven purely
+   by CSS transitions keyed off each phase's class, not JS-animated frame
+   by frame, so the motion stays smooth regardless of main-thread load. */
+
+.breathing-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.4em;
+  background: var(--bg);
+}
+
+.breathing-circle {
+  width: 40vmin;
+  height: 40vmin;
+  max-width: 14rem;
+  max-height: 14rem;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 55%, transparent), color-mix(in srgb, var(--accent) 15%, transparent));
+  box-shadow: 0 0 3em color-mix(in srgb, var(--accent) 35%, transparent);
+  transform: scale(0.55);
+  transition: transform 4s ease-in-out;
+}
+
+/* Only .breathing-inhale/.breathing-exhale ever get applied by script.js
+   (see BREATHING_PHASES) - the two "Hold" phases deliberately leave the
+   circle's class untouched, so it just keeps whatever scale the
+   transition already animated it to rather than needing a rule of their
+   own to hold that value. */
+.breathing-circle.breathing-inhale {
+  transform: scale(1);
+}
+.breathing-circle.breathing-exhale {
+  transform: scale(0.55);
+}
+
+.breathing-label {
+  font-size: var(--fs-display);
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: 0.02em;
+}
+
+/* ---- Themes ------------------------------------------------------------
+   One shared layout/markup/script.js underneath every theme - each block
+   below just swaps palette/typography/shape/shadow variables (plus a
+   couple of decorative rules where a theme's identity needs more than a
+   variable swap). Selected via [data-theme] on <html>, set by
+   setupThemePicker() in script.js (and mirrored synchronously in
+   index.html's inline <head> script to avoid a flash of the wrong theme).
+
+   Deliberately NOT touched here: --accent's *dynamic* weather-driven
+   value (see applyAccentColor()/NIGHT_WEATHER_ACCENT in script.js), which
+   overrides these defaults live via an inline style on <html> regardless
+   of theme. Each theme's --accent below is just the fallback shown before
+   the first weather poll resolves - the weather-mood-color behavior is
+   intentionally shared across every theme, not something themes opt out
+   of. */
+
+[data-theme="materialyou"] {
+  --bg: #1c1b1f;
+  --surface: #272528;
+  --surface-elevated: #322f33;
+  --text-primary: #e6e1e5;
+  --text-secondary: #938f99;
+  --text-tertiary: #6f6a75;
+  --accent: #d0bcff;
+  --accent-gray: #938f99;
+  --divider: rgba(230, 225, 229, 0.1);
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  --radius-lg: 1.75rem;
+  --radius-md: 1.1rem;
+}
+
+/* M3's actual signature isn't the palette, it's the "expressive" motion -
+   a large, slow-breathing tonal wash behind the hero panel, like the
+   dynamic-color wallpaper backdrop stock Android 12+ builds this exact
+   palette from. ::before rather than a real element so it costs nothing
+   in markup and naturally paints behind .hero-panel's real children
+   (pseudo-elements insert first) without needing z-index at all. */
+[data-theme="materialyou"] .hero-panel::before {
+  content: "";
+  position: absolute;
+  top: -25%;
+  right: -25%;
+  width: 24rem;
+  height: 24rem;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 20%, transparent), transparent 72%);
+  pointer-events: none;
+}
+
+@keyframes m3-glow-breathe {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.65;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 1;
+  }
+}
+
+[data-theme="materialyou"] .hero-panel::before {
+  animation: m3-glow-breathe 9s ease-in-out infinite;
+}
+
+/* Cards get an even bigger, more "pill"-like radius than the theme's own
+   already-large default - M3's containers are rounder than almost
+   anything else in Android's design language. */
+[data-theme="materialyou"] .card,
+[data-theme="materialyou"] .panel {
+  border-radius: 1.6rem;
+}
+
+[data-theme="nothingos"] {
+  --bg: #000000;
+  --surface: #0a0a0a;
+  --surface-elevated: #141414;
+  --text-primary: #ffffff;
+  --text-secondary: #8a8a8a;
+  --text-tertiary: #545454;
+  --accent: #ffffff;
+  --accent-gray: #ffffff;
+  --divider: rgba(255, 255, 255, 0.14);
+  --shadow: none;
+  --radius-lg: 0.4rem;
+  --radius-md: 0.3rem;
+  --font: ui-monospace, "SF Mono", "Roboto Mono", "Droid Sans Mono", Menlo, Consolas, monospace;
+}
+
+[data-theme="nothingos"] .card {
+  border: 1px solid var(--divider);
+  background: transparent;
+}
+
+[data-theme="nothingos"] .card-title {
+  letter-spacing: 0.12em;
+}
+
+[data-theme="nothingos"] .page-dot.active::before {
+  background: #d1223b !important;
+}
+
+/* Nothing's signature red "Glyph" LED, pulsing like a real notification
+   light - a small dot before every card title rather than the plain
+   uppercase label alone. */
+[data-theme="nothingos"] .card-title::before,
+[data-theme="nothingos"] .panel-title::before {
+  content: "";
+  display: inline-block;
+  width: 0.4em;
+  height: 0.4em;
+  border-radius: 50%;
+  background: #d1223b;
+  animation: nothing-glyph-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes nothing-glyph-pulse {
+  0%, 100% {
+    opacity: 0.45;
+    box-shadow: 0 0 0 0 rgba(209, 34, 59, 0.5);
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 0.4em 0.05em rgba(209, 34, 59, 0.5);
+  }
+}
+
+/* A halftone dot-matrix cutout over the big clock digits - Nothing's own
+   glyph typeface is itself built from a dot grid. mask-image degrades
+   gracefully (solid text instead of dotted) on the rare WebView that
+   doesn't support it, so there's no real risk in reaching for it here. */
+[data-theme="nothingos"] .clock-time,
+[data-theme="nothingos"] .clock-time-huge {
+  -webkit-mask-image: radial-gradient(circle, #000 52%, transparent 53%);
+  -webkit-mask-size: 5px 5px;
+  -webkit-mask-repeat: repeat;
+  mask-image: radial-gradient(circle, #000 52%, transparent 53%);
+  mask-size: 5px 5px;
+  mask-repeat: repeat;
+}
+
+[data-theme="pixel"] {
+  --bg: #131314;
+  --surface: #1e1f20;
+  --surface-elevated: #28292a;
+  --text-primary: #e3e3e3;
+  --text-secondary: #9aa0a6;
+  --text-tertiary: #5f6368;
+  --accent: #8ab4f8;
+  --accent-gray: #9aa0a6;
+  --divider: rgba(227, 227, 227, 0.1);
+  --shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  --radius-lg: 1.5rem;
+  --radius-md: 1rem;
+}
+
+/* Google's own 4-color dots (the boot animation, the Assistant mic, the
+   old Photos logo) as a small flourish under the clock - the one truly
+   Google-specific visual signature stock Android's own settings/theming
+   UI never actually uses itself. */
+[data-theme="pixel"] .clock-panel::after {
+  content: "";
+  display: block;
+  width: 3.4em;
+  height: 0.55em;
+  margin-top: 0.35em;
+  background:
+    radial-gradient(circle, #4285f4 32%, transparent 33%) 0% 50% / 25% 100% no-repeat,
+    radial-gradient(circle, #ea4335 32%, transparent 33%) 33% 50% / 25% 100% no-repeat,
+    radial-gradient(circle, #fbbc05 32%, transparent 33%) 66% 50% / 25% 100% no-repeat,
+    radial-gradient(circle, #34a853 32%, transparent 33%) 100% 50% / 25% 100% no-repeat;
+  opacity: 0.9;
+}
+
+/* The page-dot indicator cycles through the same 4 colors instead of a
+   single flat accent - each dot's *position* picks its color, not
+   whichever page is active, so the sequence stays stable as you swipe. */
+[data-theme="pixel"] .page-dot:nth-child(4n + 1).active::before {
+  background: #4285f4 !important;
+}
+
+[data-theme="pixel"] .page-dot:nth-child(4n + 2).active::before {
+  background: #ea4335 !important;
+}
+
+[data-theme="pixel"] .page-dot:nth-child(4n + 3).active::before {
+  background: #fbbc05 !important;
+}
+
+[data-theme="pixel"] .page-dot:nth-child(4n + 4).active::before {
+  background: #34a853 !important;
+}
+
+/* A soft expanding ring on press, in place of the shared .icon-button
+   fill-swap - closer to stock Android's own ripple feedback than a hard
+   color change. */
+[data-theme="pixel"] .icon-button:active {
+  box-shadow: 0 0 0 0.5em color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+[data-theme="retrocrt"] {
+  --bg: #020a02;
+  --surface: #04140a;
+  --surface-elevated: #082010;
+  --text-primary: #33ff66;
+  --text-secondary: #22b34a;
+  --text-tertiary: #157533;
+  --accent: #33ff66;
+  --accent-gray: #33ff66;
+  --divider: rgba(51, 255, 102, 0.2);
+  --shadow: none;
+  --radius-lg: 0.35rem;
+  --radius-md: 0.25rem;
+  --font: ui-monospace, "Roboto Mono", "Droid Sans Mono", Menlo, Consolas, monospace;
+}
+
+[data-theme="retrocrt"] body {
+  text-shadow: 0 0 4px currentColor;
+}
+
+[data-theme="retrocrt"] .card {
+  border: 1px solid var(--divider);
+}
+
+/* Scanline overlay - a plain striped semi-transparent layer, cheap to
+   paint since it never changes (no animation), sits above the pager
+   (z-index: 1) and the weather effect (z-index: 2) but below Ambient/
+   Bedside Mode and the alarm overlay (z-index: 100) so an alarm is never
+   dimmed by it. */
+html[data-theme="retrocrt"]::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.35) 0,
+    rgba(0, 0, 0, 0.35) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+}
+
+/* Tube curvature vignette - a real CRT's phosphor is brightest dead
+   center and falls off toward the corners, unlike a flat LCD. Static
+   gradient, same z-index tier as the scanlines, painted first so the
+   scanlines still read on top of it. */
+html[data-theme="retrocrt"]::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, 0.5) 100%);
+}
+
+/* An occasional brief dip, not a constant strobe - steps(1) gives it a
+   sharp digital snap rather than a smooth fade, closer to a real tube's
+   flicker than a breathing pulse would read. */
+@keyframes crt-flicker {
+  0%, 95%, 100% {
+    opacity: 1;
+  }
+  96% {
+    opacity: 0.9;
+  }
+  97% {
+    opacity: 1;
+  }
+  98% {
+    opacity: 0.94;
+  }
+}
+
+[data-theme="retrocrt"] body {
+  animation: crt-flicker 7s steps(1) infinite;
+}
+
+[data-theme="oledminimal"] {
+  --bg: #000000;
+  --surface: #000000;
+  --surface-elevated: #000000;
+  --text-primary: #f0f0f0;
+  --text-secondary: #808080;
+  --text-tertiary: #4d4d4d;
+  --accent: #e0e0e0;
+  --accent-gray: #e0e0e0;
+  --divider: rgba(255, 255, 255, 0.12);
+  --shadow: none;
+  --radius-lg: 0.9rem;
+  --radius-md: 0.6rem;
+}
+
+[data-theme="oledminimal"] .card {
+  border: 1px solid var(--divider);
+}
+
+/* This theme's whole identity is restraint - true blacks, no shadow, no
+   decoration - so its one signature touch has to be quiet too: a hairline
+   accent rule under each card title that gently breathes rather than
+   sitting static, the smallest possible sign of life without betraying
+   the minimalism it's built around. */
+[data-theme="oledminimal"] .card-title,
+[data-theme="oledminimal"] .panel-title {
+  position: relative;
+  padding-bottom: 0.35em;
+}
+
+[data-theme="oledminimal"] .card-title::after,
+[data-theme="oledminimal"] .panel-title::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 1px;
+  background: var(--accent);
+  animation: oled-rule-breathe 6s ease-in-out infinite;
+}
+
+@keyframes oled-rule-breathe {
+  0%, 100% {
+    width: 1.2em;
+    opacity: 0.3;
+  }
+  50% {
+    width: 2.2em;
+    opacity: 0.75;
+  }
+}
+
+[data-theme="catppuccin"] {
+  --bg: #1e1e2e;
+  --surface: #181825;
+  --surface-elevated: #313244;
+  --text-primary: #cdd6f4;
+  --text-secondary: #a6adc8;
+  --text-tertiary: #6c7086;
+  --accent: #cba6f7;
+  --accent-gray: #a6adc8;
+  --accent-blue: #89b4fa;
+  --divider: rgba(205, 214, 244, 0.1);
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  --radius-lg: 1.4rem;
+  --radius-md: 0.9rem;
+}
+
+/* Catppuccin's community identity is "cozy" above all - a soft colored
+   glow around every card (mauve, its signature accent) rather than a
+   plain dark shadow, plus a second warm wash behind the hero panel using
+   the palette's blue for a little more color variety than one hue alone. */
+[data-theme="catppuccin"] .card,
+[data-theme="catppuccin"] .panel {
+  box-shadow: 0 0 1.6em color-mix(in srgb, var(--accent) 14%, transparent), var(--shadow);
+}
+
+[data-theme="catppuccin"] .hero-panel::before {
+  content: "";
+  position: absolute;
+  top: -20%;
+  left: -15%;
+  width: 20rem;
+  height: 20rem;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent-blue) 20%, transparent), transparent 72%);
+  pointer-events: none;
+}
+
+[data-theme="nord"] {
+  --bg: #2e3440;
+  --surface: #3b4252;
+  --surface-elevated: #434c5e;
+  --text-primary: #eceff4;
+  --text-secondary: #d8dee9;
+  --text-tertiary: #7b8394;
+  --accent: #88c0d0;
+  --accent-gray: #d8dee9;
+  --accent-blue: #5e81ac;
+  --divider: rgba(236, 239, 244, 0.1);
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  --radius-lg: 0.6rem;
+  --radius-md: 0.4rem;
+}
+
+/* Nord's whole palette is arctic light - sharper, more geometric corners
+   than the shared default (already overridden above) plus a faint frost
+   vignette at the screen edges, like looking through a cold window. Same
+   static-gradient-not-backdrop-filter reasoning as the weather
+   condensation effect elsewhere: costs nothing per frame. */
+[data-theme="nord"] .card,
+[data-theme="nord"] .panel {
+  border: 1px solid var(--divider);
+}
+
+html[data-theme="nord"]::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 58%, rgba(136, 192, 208, 0.1) 100%);
+}
+
+[data-theme="gruvbox"] {
+  --bg: #282828;
+  --surface: #3c3836;
+  --surface-elevated: #504945;
+  --text-primary: #ebdbb2;
+  --text-secondary: #bdae93;
+  --text-tertiary: #8a8374;
+  --accent: #fe8019;
+  --accent-gray: #bdae93;
+  --accent-blue: #83a598;
+  --divider: rgba(235, 219, 178, 0.12);
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  --radius-lg: 1rem;
+  --radius-md: 0.7rem;
+}
+
+/* Gruvbox's whole appeal is "vintage terminal, warm paper" rather than
+   clinical dark mode - a faint dot-grain texture over everything (a tiny
+   static tile, not an image, so it costs nothing to paint) plus a warm
+   inset highlight on every card standing in for the subtle bevel old
+   terminal chrome had. */
+html[data-theme="gruvbox"]::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  opacity: 0.05;
+  background-image: radial-gradient(circle, #000 1px, transparent 1px);
+  background-size: 3px 3px;
+}
+
+[data-theme="gruvbox"] .card,
+[data-theme="gruvbox"] .panel {
+  box-shadow: inset 0 0 0 1px rgba(235, 219, 178, 0.07), 0 8px 20px rgba(0, 0, 0, 0.35);
+}
