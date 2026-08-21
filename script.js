@@ -64,6 +64,7 @@ const TILE_DOM_ID = {
   alarm: "card-alarm",
   sound: "card-sound",
   worldclock: "card-worldclock",
+  countdown: "card-countdown",
 };
 
 const TILE_SIZE_WEIGHT = { small: 0.7, medium: 1, large: 1.5 };
@@ -74,6 +75,7 @@ const DEFAULT_TILE_LAYOUT = [
   { id: "alarm", visible: true, size: "small" },
   { id: "sound", visible: true, size: "large" },
   { id: "worldclock", visible: false, size: "small" },
+  { id: "countdown", visible: false, size: "small" },
 ];
 
 const LAYOUT_KEY = "aurora-dashboard:layout";
@@ -143,6 +145,9 @@ const ICONS = {
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5L18 18M18 6l-2.5 2.5M8.5 15.5L6 18"/><circle cx="12" cy="12" r="2.2" fill="currentColor" stroke="none"/></svg>',
   scroll:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21a2 2 0 0 1-2-2V5a2 2 0 0 1 4 0v14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-2H10"/><path d="M6 5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v10h-4"/></svg>',
+  calculator:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 6h8"/><circle cx="8" cy="11" r="0.9" fill="currentColor" stroke="none"/><circle cx="12" cy="11" r="0.9" fill="currentColor" stroke="none"/><circle cx="16" cy="11" r="0.9" fill="currentColor" stroke="none"/><circle cx="8" cy="15" r="0.9" fill="currentColor" stroke="none"/><circle cx="12" cy="15" r="0.9" fill="currentColor" stroke="none"/><circle cx="16" cy="15" r="0.9" fill="currentColor" stroke="none"/><circle cx="8" cy="19" r="0.9" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="0.9" fill="currentColor" stroke="none"/><circle cx="16" cy="19" r="0.9" fill="currentColor" stroke="none"/></svg>',
+  swap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v13M7 4L3 8M7 4l4 4"/><path d="M17 20V7M17 20l4-4M17 20l-4-4"/></svg>',
 };
 
 // ---------------------------------------------------------------------------
@@ -1153,6 +1158,17 @@ function updateClock() {
   renderWeatherBgActiveHint();
   checkWakeAlarms();
   renderWorldClocks();
+
+  // "Days until" only ever changes at midnight - no need to recompute it
+  // every second like the clock itself, just once per actual calendar-day
+  // change (localDateKey(now) has already been computed indirectly by
+  // checkWakeAlarms() above, but recomputing here keeps this self-
+  // contained rather than reaching into that function's internals).
+  const todayKeyForCountdown = localDateKey(now);
+  if (todayKeyForCountdown !== lastCountdownRenderDateKey) {
+    lastCountdownRenderDateKey = todayKeyForCountdown;
+    renderCountdowns();
+  }
 }
 
 function startClock() {
@@ -1875,6 +1891,7 @@ const TILE_LABELS = {
   alarm: "Next Alarm",
   sound: "Sound Machine",
   worldclock: "World Clock",
+  countdown: "Countdown",
 };
 
 let lastLayoutTiles = null;
@@ -1883,7 +1900,17 @@ function loadLayout() {
   try {
     const raw = localStorage.getItem(LAYOUT_KEY);
     const parsed = raw ? JSON.parse(raw) : null;
-    return parsed && parsed.length > 0 ? parsed : DEFAULT_TILE_LAYOUT;
+    const stored = parsed && parsed.length > 0 ? parsed : DEFAULT_TILE_LAYOUT;
+
+    // A tile added to DEFAULT_TILE_LAYOUT after someone already saved a
+    // customized layout (e.g. this update's new Countdown tile) wouldn't
+    // exist in their stored array at all - without this merge, it would
+    // just silently never appear, since a customized layout is otherwise
+    // used exactly as saved. Appended at the end with its own configured
+    // default visibility/size rather than dropped.
+    const storedIds = new Set(stored.map((tile) => tile.id));
+    const missingTiles = DEFAULT_TILE_LAYOUT.filter((tile) => !storedIds.has(tile.id));
+    return missingTiles.length > 0 ? [...stored, ...missingTiles] : stored;
   } catch (err) {
     return DEFAULT_TILE_LAYOUT;
   }
@@ -3362,6 +3389,363 @@ function setupTimerPage() {
 }
 
 // ---------------------------------------------------------------------------
+// Calculator - Utilities page, first segment. Operates left-to-right as
+// each operator is pressed (like a real pocket calculator, not a full
+// expression parser with precedence/parentheses) - that's what everyone
+// actually expects from a physical calculator anyway.
+// ---------------------------------------------------------------------------
+
+let calcDisplayValue = "0";
+let calcPreviousValue = null;
+let calcOperator = null;
+let calcWaitingForOperand = false;
+
+function renderCalculator() {
+  const display = byId("calc-display");
+  if (display) display.textContent = calcDisplayValue;
+}
+
+function calcInputDigit(digit) {
+  if (calcWaitingForOperand) {
+    calcDisplayValue = digit;
+    calcWaitingForOperand = false;
+  } else {
+    calcDisplayValue = calcDisplayValue === "0" ? digit : calcDisplayValue + digit;
+  }
+  renderCalculator();
+}
+
+function calcInputDecimal() {
+  if (calcWaitingForOperand) {
+    calcDisplayValue = "0.";
+    calcWaitingForOperand = false;
+  } else if (!calcDisplayValue.includes(".")) {
+    calcDisplayValue += ".";
+  }
+  renderCalculator();
+}
+
+function calcClear() {
+  calcDisplayValue = "0";
+  calcPreviousValue = null;
+  calcOperator = null;
+  calcWaitingForOperand = false;
+  renderCalculator();
+}
+
+function calcBackspace() {
+  if (calcWaitingForOperand) return;
+  calcDisplayValue = calcDisplayValue.length > 1 ? calcDisplayValue.slice(0, -1) : "0";
+  renderCalculator();
+}
+
+function calcCompute(a, b, operator) {
+  switch (operator) {
+    case "+":
+      return a + b;
+    case "-":
+      return a - b;
+    case "*":
+      return a * b;
+    case "/":
+      return b === 0 ? NaN : a / b;
+    default:
+      return b;
+  }
+}
+
+/** Rounds away the floating-point noise a plain a+b/a*b can leave behind
+ *  (0.1 + 0.2 === 0.30000000000000004) before it ever reaches the
+ *  display - nobody wants to see that on a calculator. */
+function calcFormatResult(value) {
+  if (Number.isNaN(value) || !Number.isFinite(value)) return "Error";
+  return String(Math.round(value * 1e10) / 1e10);
+}
+
+function calcApplyOperator(nextOperator) {
+  const inputValue = parseFloat(calcDisplayValue);
+
+  if (calcPreviousValue == null) {
+    calcPreviousValue = inputValue;
+  } else if (calcOperator && !calcWaitingForOperand) {
+    calcPreviousValue = calcCompute(calcPreviousValue, inputValue, calcOperator);
+    calcDisplayValue = calcFormatResult(calcPreviousValue);
+  }
+
+  calcWaitingForOperand = true;
+  calcOperator = nextOperator;
+  renderCalculator();
+}
+
+function calcEquals() {
+  if (calcOperator == null || calcPreviousValue == null) return;
+  const inputValue = parseFloat(calcDisplayValue);
+  calcDisplayValue = calcFormatResult(calcCompute(calcPreviousValue, inputValue, calcOperator));
+  calcPreviousValue = null;
+  calcOperator = null;
+  calcWaitingForOperand = true;
+  renderCalculator();
+}
+
+function setupCalculator() {
+  byId("calc-buttons")?.addEventListener("click", (event) => {
+    const btn = event.target.closest("button");
+    if (!btn) return;
+    const { digit, op, action } = btn.dataset;
+    if (digit != null) calcInputDigit(digit);
+    else if (action === "decimal") calcInputDecimal();
+    else if (action === "clear") calcClear();
+    else if (action === "backspace") calcBackspace();
+    else if (action === "equals") calcEquals();
+    else if (op) calcApplyOperator(op);
+  });
+  renderCalculator();
+}
+
+// ---------------------------------------------------------------------------
+// Unit Converter - Utilities page, second segment. Length/Weight/Volume
+// convert through a fixed base unit (meters/kilograms/liters, standard
+// exact international definitions); Temperature is handled separately
+// since it's an affine conversion (an offset, not just a scale factor).
+// ---------------------------------------------------------------------------
+
+const CONVERTER_CATEGORIES = {
+  temperature: {
+    label: "Temperature",
+    units: [
+      { id: "f", label: "°F" },
+      { id: "c", label: "°C" },
+      { id: "k", label: "K" },
+    ],
+  },
+  length: {
+    label: "Length",
+    units: [
+      { id: "in", label: "in" },
+      { id: "ft", label: "ft" },
+      { id: "yd", label: "yd" },
+      { id: "mi", label: "mi" },
+      { id: "cm", label: "cm" },
+      { id: "m", label: "m" },
+      { id: "km", label: "km" },
+    ],
+  },
+  weight: {
+    label: "Weight",
+    units: [
+      { id: "oz", label: "oz" },
+      { id: "lb", label: "lb" },
+      { id: "g", label: "g" },
+      { id: "kg", label: "kg" },
+    ],
+  },
+  volume: {
+    label: "Volume",
+    units: [
+      { id: "floz", label: "fl oz" },
+      { id: "cup", label: "cup" },
+      { id: "gal", label: "gal" },
+      { id: "ml", label: "mL" },
+      { id: "l", label: "L" },
+    ],
+  },
+};
+
+// Meters per unit (exact international definitions).
+const LENGTH_TO_METERS = { in: 0.0254, ft: 0.3048, yd: 0.9144, mi: 1609.344, cm: 0.01, m: 1, km: 1000 };
+// Kilograms per unit (exact international avoirdupois definitions).
+const WEIGHT_TO_KG = { oz: 0.028349523125, lb: 0.45359237, g: 0.001, kg: 1 };
+// Liters per unit (exact US customary definitions).
+const VOLUME_TO_LITERS = { floz: 0.0295735295625, cup: 0.2365882365, gal: 3.785411784, ml: 0.001, l: 1 };
+
+function toCelsius(value, unit) {
+  if (unit === "c") return value;
+  if (unit === "f") return (value - 32) * (5 / 9);
+  return value - 273.15; // k
+}
+
+function fromCelsius(celsius, unit) {
+  if (unit === "c") return celsius;
+  if (unit === "f") return celsius * (9 / 5) + 32;
+  return celsius + 273.15; // k
+}
+
+function convertValue(category, value, fromUnit, toUnit) {
+  if (category === "temperature") return fromCelsius(toCelsius(value, fromUnit), toUnit);
+  const table = category === "length" ? LENGTH_TO_METERS : category === "weight" ? WEIGHT_TO_KG : VOLUME_TO_LITERS;
+  return (value * table[fromUnit]) / table[toUnit];
+}
+
+let converterCategory = "temperature";
+
+function populateConverterUnitPickers() {
+  const category = CONVERTER_CATEGORIES[converterCategory];
+  const optionsHtml = category.units.map((u) => `<option value="${u.id}">${escapeHtml(u.label)}</option>`).join("");
+  const fromPicker = byId("converter-from-unit");
+  const toPicker = byId("converter-to-unit");
+  if (fromPicker) fromPicker.innerHTML = optionsHtml;
+  if (toPicker) toPicker.innerHTML = optionsHtml;
+  // Default from/to to two different units so the first conversion shown
+  // is actually meaningful, not a same-unit no-op.
+  if (toPicker && category.units.length > 1) toPicker.value = category.units[1].id;
+}
+
+function runConverter() {
+  const input = byId("converter-input");
+  const fromUnit = byId("converter-from-unit")?.value;
+  const toUnit = byId("converter-to-unit")?.value;
+  const output = byId("converter-output");
+  if (!input || !fromUnit || !toUnit || !output) return;
+
+  const value = parseFloat(input.value);
+  if (Number.isNaN(value)) {
+    output.textContent = "";
+    return;
+  }
+  output.textContent = String(Math.round(convertValue(converterCategory, value, fromUnit, toUnit) * 10000) / 10000);
+}
+
+function setupConverter() {
+  setIcon("converter-swap-icon", "swap");
+  populateConverterUnitPickers();
+
+  byId("converter-category")?.addEventListener("change", (event) => {
+    converterCategory = event.target.value;
+    populateConverterUnitPickers();
+    runConverter();
+  });
+  byId("converter-input")?.addEventListener("input", runConverter);
+  byId("converter-from-unit")?.addEventListener("change", runConverter);
+  byId("converter-to-unit")?.addEventListener("change", runConverter);
+  byId("converter-swap-btn")?.addEventListener("click", () => {
+    const fromPicker = byId("converter-from-unit");
+    const toPicker = byId("converter-to-unit");
+    if (!fromPicker || !toPicker) return;
+    [fromPicker.value, toPicker.value] = [toPicker.value, fromPicker.value];
+    runConverter();
+  });
+}
+
+function setupUtilitiesPage() {
+  setupCalculator();
+  setupConverter();
+
+  const segmented = byId("utilities-mode-segmented");
+  segmented?.addEventListener("click", (event) => {
+    const btn = event.target.closest(".settings-segment");
+    if (!btn) return;
+    segmented.querySelectorAll(".settings-segment").forEach((b) => b.classList.toggle("active", b === btn));
+    byId("calculator-view")?.classList.toggle("hidden", btn.dataset.mode !== "calculator");
+    byId("converter-view")?.classList.toggle("hidden", btn.dataset.mode !== "converter");
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Countdown - an optional Overview tile (off by default, like World Clock)
+// showing days remaining until one or more self-picked dates. Pure
+// localStorage, no network - re-rendered once per calendar day (see
+// lastCountdownRenderDateKey, checked from updateClock()) rather than
+// every tick, since "days until" only ever changes at midnight.
+// ---------------------------------------------------------------------------
+
+const COUNTDOWN_KEY = "aurora-dashboard:countdowns";
+let countdownEntries = [];
+try {
+  countdownEntries = JSON.parse(localStorage.getItem(COUNTDOWN_KEY) || "[]");
+} catch (err) {
+  countdownEntries = [];
+}
+let lastCountdownRenderDateKey = null;
+
+function saveCountdowns() {
+  localStorage.setItem(COUNTDOWN_KEY, JSON.stringify(countdownEntries));
+}
+
+function daysUntil(dateKey) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const target = new Date(year, month - 1, day);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  target.setHours(0, 0, 0, 0);
+  return Math.round((target - today) / 86400000);
+}
+
+function renderCountdowns() {
+  const list = byId("countdown-list");
+  if (!list) return;
+
+  const upcoming = countdownEntries
+    .map((entry) => ({ ...entry, days: daysUntil(entry.date) }))
+    .filter((entry) => entry.days >= 0)
+    .sort((a, b) => a.days - b.days)
+    .slice(0, 3);
+
+  if (upcoming.length === 0) {
+    list.innerHTML = `<div class="worldclock-empty">${countdownEntries.length === 0 ? "Add a date in Settings" : "No upcoming dates"}</div>`;
+    return;
+  }
+
+  list.innerHTML = upcoming
+    .map((entry) => {
+      const dayWord = entry.days === 0 ? "Today" : entry.days === 1 ? "Tomorrow" : `${entry.days} days`;
+      return `<div class="worldclock-row">
+          <span class="worldclock-label">${escapeHtml(entry.label)}</span>
+          <span class="worldclock-time">${escapeHtml(dayWord)}</span>
+        </div>`;
+    })
+    .join("");
+}
+
+function renderCountdownSettings() {
+  const list = byId("settings-countdown-list");
+  if (!list) return;
+  if (countdownEntries.length === 0) {
+    list.innerHTML = '<div class="settings-app-empty">No dates added yet</div>';
+    return;
+  }
+  list.innerHTML = countdownEntries
+    .map(
+      (entry, index) => `<div class="settings-app-row" data-index="${index}">
+        <span class="settings-app-label">${escapeHtml(entry.label)} - ${escapeHtml(entry.date)}</span>
+        <button class="icon-button countdown-remove" type="button" aria-label="Remove ${escapeHtml(entry.label)}">
+          <span class="icon-slot small" aria-hidden="true">${ICONS.close}</span>
+        </button>
+      </div>`
+    )
+    .join("");
+}
+
+function setupCountdown() {
+  setIcon("countdown-title-icon", "calendar");
+  renderCountdowns();
+  renderCountdownSettings();
+
+  byId("countdown-add-btn")?.addEventListener("click", () => {
+    const dateInput = byId("countdown-add-date");
+    const labelInput = byId("countdown-add-label");
+    const date = dateInput?.value;
+    const label = labelInput?.value.trim();
+    if (!date || !label) return;
+    countdownEntries.push({ date, label });
+    saveCountdowns();
+    renderCountdowns();
+    renderCountdownSettings();
+    if (labelInput) labelInput.value = "";
+  });
+
+  byId("settings-countdown-list")?.addEventListener("click", (event) => {
+    const removeBtn = event.target.closest(".countdown-remove");
+    if (!removeBtn) return;
+    const index = Number(removeBtn.closest("[data-index]")?.dataset.index);
+    if (Number.isNaN(index)) return;
+    countdownEntries.splice(index, 1);
+    saveCountdowns();
+    renderCountdowns();
+    renderCountdownSettings();
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Weather - fetched directly from two free, unauthenticated, CORS-enabled
 // public APIs (Open-Meteo and the National Weather Service) instead of
 // proxied through Aurora, which no longer exists. Same fixed home
@@ -4314,6 +4698,8 @@ function init() {
   setupWakeAlarmForm();
   setupWakeAlarmRingingControls();
   setupTimerPage();
+  setupUtilitiesPage();
+  setupCountdown();
   setupReadingMode();
   setupWeekView();
   renderSleepHistory();

@@ -239,6 +239,14 @@
           </h2>
           <div class="worldclock-list" id="worldclock-list"></div>
         </section>
+
+        <section class="card card-countdown" id="card-countdown" aria-label="Countdown">
+          <h2 class="card-title">
+            <span class="icon-slot small" id="countdown-title-icon" aria-hidden="true"></span>
+            Countdown
+          </h2>
+          <div class="worldclock-list" id="countdown-list"></div>
+        </section>
       </main>
     </section>
 
@@ -443,6 +451,17 @@
       </div>
 
       <div class="settings-section">
+        <h2 class="settings-title">Countdown</h2>
+        <div class="settings-text-hint">Days remaining until a date you pick - a trip, a birthday, anything.</div>
+        <div class="settings-countdown-list" id="settings-countdown-list"></div>
+        <div class="settings-schedule-add-row">
+          <input type="date" id="countdown-add-date" class="settings-text-input" aria-label="Countdown target date" />
+          <input type="text" id="countdown-add-label" class="settings-text-input" placeholder="Label…" maxlength="40" autocomplete="off" aria-label="Countdown label" />
+          <button class="settings-add-btn" type="button" id="countdown-add-btn">Add</button>
+        </div>
+      </div>
+
+      <div class="settings-section">
         <h2 class="settings-title">Custom Sounds</h2>
         <div class="settings-text-hint">Import your own audio files - they show up as options for both the Sound Machine and Wake Alarms, alongside the built-in ones.</div>
         <div class="settings-customsounds-list" id="settings-customsounds-list"></div>
@@ -638,6 +657,67 @@
         <ul class="stopwatch-laps" id="stopwatch-laps"></ul>
       </div>
     </section>
+
+    <!-- Page 7: Utilities - a plain calculator and a unit converter,
+         genuinely handy on a kiosk display without reaching for a phone.
+         Same segmented-view pattern as the Timer/Stopwatch page. -->
+    <section class="page page-utilities" id="page-utilities" aria-label="Calculator and Converter">
+      <div class="settings-segmented utilities-mode-segmented" id="utilities-mode-segmented" role="radiogroup" aria-label="Calculator or converter">
+        <button class="settings-segment active" type="button" data-mode="calculator">Calculator</button>
+        <button class="settings-segment" type="button" data-mode="converter">Converter</button>
+      </div>
+
+      <div class="calculator-view" id="calculator-view">
+        <div class="calc-display" id="calc-display">0</div>
+        <div class="calc-buttons" id="calc-buttons">
+          <button class="calc-btn calc-btn-fn" type="button" data-action="clear">C</button>
+          <button class="calc-btn calc-btn-fn" type="button" data-action="backspace">⌫</button>
+          <button class="calc-btn calc-btn-op" type="button" data-op="/">÷</button>
+          <button class="calc-btn calc-btn-op" type="button" data-op="*">×</button>
+
+          <button class="calc-btn" type="button" data-digit="7">7</button>
+          <button class="calc-btn" type="button" data-digit="8">8</button>
+          <button class="calc-btn" type="button" data-digit="9">9</button>
+          <button class="calc-btn calc-btn-op" type="button" data-op="-">−</button>
+
+          <button class="calc-btn" type="button" data-digit="4">4</button>
+          <button class="calc-btn" type="button" data-digit="5">5</button>
+          <button class="calc-btn" type="button" data-digit="6">6</button>
+          <button class="calc-btn calc-btn-op" type="button" data-op="+">+</button>
+
+          <button class="calc-btn" type="button" data-digit="1">1</button>
+          <button class="calc-btn" type="button" data-digit="2">2</button>
+          <button class="calc-btn" type="button" data-digit="3">3</button>
+          <button class="calc-btn calc-btn-equals" type="button" data-action="equals">=</button>
+
+          <button class="calc-btn" type="button" data-digit="0">0</button>
+          <button class="calc-btn" type="button" data-action="decimal">.</button>
+        </div>
+      </div>
+
+      <div class="converter-view hidden" id="converter-view">
+        <div class="settings-text-row">
+          <span class="settings-text-label">Category</span>
+          <select class="settings-select" id="converter-category" aria-label="Conversion category">
+            <option value="temperature">Temperature</option>
+            <option value="length">Length</option>
+            <option value="weight">Weight</option>
+            <option value="volume">Volume</option>
+          </select>
+        </div>
+        <div class="converter-row">
+          <input type="number" id="converter-input" class="settings-text-input converter-input" inputmode="decimal" placeholder="0" aria-label="Value to convert" />
+          <select class="sound-select" id="converter-from-unit" aria-label="From unit"></select>
+        </div>
+        <button class="icon-button converter-swap-btn" id="converter-swap-btn" type="button" aria-label="Swap units">
+          <span class="icon-slot" id="converter-swap-icon" aria-hidden="true"></span>
+        </button>
+        <div class="converter-row">
+          <div class="converter-output" id="converter-output"></div>
+          <select class="sound-select" id="converter-to-unit" aria-label="To unit"></select>
+        </div>
+      </div>
+    </section>
   </div>
 
   <nav class="page-dots" id="page-dots" aria-label="Dashboard pages">
@@ -647,6 +727,7 @@
     <button class="page-dot" data-page="3" aria-label="Wake Alarms"></button>
     <button class="page-dot" data-page="4" aria-label="Settings"></button>
     <button class="page-dot" data-page="5" aria-label="Timer and Stopwatch"></button>
+    <button class="page-dot" data-page="6" aria-label="Calculator and Converter"></button>
   </nav>
 
   <!-- Week-ahead glance and Agenda editor, opened from the Agenda card's

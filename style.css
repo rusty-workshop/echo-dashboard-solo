@@ -4203,6 +4203,135 @@ body.ambient-active .weather-bg {
   letter-spacing: 0.02em;
 }
 
+/* ---- Utilities: Calculator + Converter -------------------------------
+   Same segmented-view shape as the Timer/Stopwatch page - one page, two
+   toggleable views, .utilities-mode-segmented reusing .settings-segmented's
+   look rather than a second segmented-control style. */
+
+.page-utilities {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(0.75rem, 2.5vh, 1.5rem);
+}
+
+.utilities-mode-segmented {
+  width: min(20rem, 70vw);
+}
+
+.calculator-view {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.6em;
+  width: min(24rem, 80vw);
+}
+
+.calc-display {
+  text-align: right;
+  font-size: clamp(2rem, 7vw, 3rem);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  padding: 0.3em 0.5em;
+  background: var(--surface-elevated);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calc-buttons {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.5em;
+}
+
+.calc-btn {
+  background: var(--surface-elevated);
+  border: none;
+  border-radius: var(--radius-md);
+  padding: 0.55em 0;
+  font-family: inherit;
+  font-size: var(--fs-body-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.calc-btn:active {
+  background: var(--surface);
+}
+
+.calc-btn-fn {
+  color: var(--text-secondary);
+}
+
+.calc-btn-op {
+  color: var(--accent);
+}
+
+.calc-btn-equals {
+  background: var(--accent);
+  color: var(--surface);
+}
+
+.converter-view {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6em;
+  width: min(24rem, 80vw);
+}
+
+.converter-row {
+  display: flex;
+  gap: 0.5em;
+  width: 100%;
+}
+
+.converter-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.converter-row .sound-select {
+  flex: none;
+  width: 6.5rem;
+}
+
+.converter-output {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 0.7em;
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+  font-size: var(--fs-body-lg);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.converter-swap-btn {
+  transform: rotate(90deg);
+}
+
+/* ---- Countdown settings list ------------------------------------------
+   Same row/remove-button shape as the World Clock settings list right
+   above it in Settings. */
+
+.settings-countdown-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
+  margin-bottom: 0.6em;
+}
+
 /* ---- Themes ------------------------------------------------------------
    One shared layout/markup/script.js underneath every theme - each block
    below just swaps palette/typography/shape/shadow variables (plus a

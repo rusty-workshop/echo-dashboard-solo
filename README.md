@@ -98,6 +98,16 @@ over unchanged.
 - **World Clock**: an optional Overview tile (off by default — turn it on
   in Dashboard Layout) showing a short, self-picked list of other cities'
   current time. Pure `Intl`/`localStorage`, no network involved.
+- **Calculator and Unit Converter**: a seventh page, reached the same way as
+  every other page (swipe or tap its dot), toggled between the two with a
+  segmented control. The calculator is a plain left-to-right pocket
+  calculator, not a full expression parser. The converter handles
+  temperature, length, weight, and volume with exact standard conversion
+  constants and a one-tap swap between "from"/"to" units.
+- **Countdown**: an optional Overview tile (off by default — turn it on in
+  Dashboard Layout) showing the days remaining until up to a handful of
+  self-picked dates, managed from Settings. Purely local — no network,
+  re-evaluated once per day rather than every clock tick.
 - **Today in History**: three real historical events for today's date, via
   Wikipedia's public "on this day" feed. Daily Info page only, and simply
   hides itself on a failed fetch rather than showing anything broken —
