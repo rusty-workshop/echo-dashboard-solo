@@ -1901,6 +1901,42 @@ body.reading-mode-active .reading-mode-overlay {
   border-color: var(--accent);
 }
 
+/* Wraps a thumb + its own small remove badge - the original
+   echo-dashboard's photo grid was a pure picker (the library itself was
+   managed on the Aurora phone app), but this fork's grid IS the import
+   library, so each thumbnail needs its own delete affordance. */
+.settings-photo-thumb-wrap {
+  position: relative;
+}
+
+.settings-photo-thumb-wrap .settings-photo-thumb {
+  width: 100%;
+  height: 100%;
+}
+
+.settings-photo-thumb-remove {
+  position: absolute;
+  top: -0.35em;
+  right: -0.35em;
+  width: 1.3rem;
+  height: 1.3rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.25em;
+  border: none;
+  border-radius: 50%;
+  background: var(--surface-elevated);
+  color: var(--text-secondary);
+  box-shadow: var(--shadow);
+  cursor: pointer;
+}
+
+.settings-photo-thumb-remove svg {
+  width: 100%;
+  height: 100%;
+}
+
 .settings-photo-empty {
   grid-column: 1 / -1;
   font-size: var(--fs-body);
@@ -2723,6 +2759,40 @@ body.ambient-active {
 
 .icon-pop {
   animation: icon-pop 480ms ease-out;
+}
+
+/* ---- Wallpaper -----------------------------------------------------------
+   Empty (no photos imported) until startWallpaperRotation()/
+   showWallpaperPhoto() in script.js has something to show - one z-index
+   below the weather background, so rain/snow/stars/etc. still animate on
+   top of it. Two stacked layers crossfade between photos on their own
+   slower rotation. The scrim keeps card text legible against an arbitrary
+   photo without needing to know anything about that photo. */
+
+.wallpaper-bg {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+}
+
+.wallpaper-photo-layer {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  opacity: 0;
+  transition: opacity 2.5s ease;
+}
+
+.wallpaper-photo-layer.visible {
+  opacity: 1;
+}
+
+.wallpaper-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
 }
 
 /* ---- Ambient weather backgrounds ------------------------------------------

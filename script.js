@@ -320,6 +320,95 @@ function applyAccentColor(condition) {
   document.documentElement.style.setProperty("--accent", ACCENT_BY_CONDITION[condition] || "#9aa5b1");
 }
 
+// ---------------------------------------------------------------------------
+// Wallpaper accent-color extraction - averages a downsampled draw of a
+// wallpaper photo and boosts saturation/lightness to a comfortable UI
+// range (a plain pixel average from a real photo reads as muddy gray, not
+// a usable accent). Kept here with the rest of the accent logic even
+// though the wallpaper photos themselves live further down, next to their
+// own IndexedDB storage.
+// ---------------------------------------------------------------------------
+
+let wallpaperAccentColor = null; // null = no wallpaper photo showing, weather drives the accent as usual
+
+function rgbToHsl(r, g, b) {
+  r /= 255;
+  g /= 255;
+  b /= 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  let h = 0;
+  let s = 0;
+  const l = (max + min) / 2;
+  const delta = max - min;
+  if (delta !== 0) {
+    s = delta / (1 - Math.abs(2 * l - 1));
+    switch (max) {
+      case r:
+        h = ((g - b) / delta) % 6;
+        break;
+      case g:
+        h = (b - r) / delta + 2;
+        break;
+      default:
+        h = (r - g) / delta + 4;
+    }
+    h *= 60;
+    if (h < 0) h += 360;
+  }
+  return [h, s, l];
+}
+
+function hslToRgb(h, s, l) {
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  let [r, g, b] = [0, 0, 0];
+  if (h < 60) [r, g, b] = [c, x, 0];
+  else if (h < 120) [r, g, b] = [x, c, 0];
+  else if (h < 180) [r, g, b] = [0, c, x];
+  else if (h < 240) [r, g, b] = [0, x, c];
+  else if (h < 300) [r, g, b] = [x, 0, c];
+  else [r, g, b] = [c, 0, x];
+  return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
+}
+
+function extractWallpaperAccentColor(imageEl) {
+  const size = 40;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(imageEl, 0, 0, size, size);
+
+  let data;
+  try {
+    data = ctx.getImageData(0, 0, size, size).data;
+  } catch (err) {
+    return null; // Shouldn't happen for a blob: URL - same-origin by definition, never taints the canvas.
+  }
+
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  let count = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] < 128) continue; // skip mostly-transparent pixels
+    r += data[i];
+    g += data[i + 1];
+    b += data[i + 2];
+    count++;
+  }
+  if (count === 0) return null;
+  r = Math.round(r / count);
+  g = Math.round(g / count);
+  b = Math.round(b / count);
+
+  const [h, s] = rgbToHsl(r, g, b);
+  const [ar, ag, ab] = hslToRgb(h, Math.max(s, 0.5), 0.62);
+  return `rgb(${ar}, ${ag}, ${ab})`;
+}
+
 // One of 8 ambient background treatments - each condition gets its own
 // look (see style.css's "Ambient weather backgrounds" section). Night
 // wins over a clear sky (stars, not a sun glow) but rain/snow/storm keep
@@ -1167,6 +1256,11 @@ function updateClock() {
   checkWakeAlarms();
   renderWorldClocks();
 
+  // Cheap and idempotent (showWallpaperPhoto() no-ops once the right
+  // photo is already showing) - this is what lets Scheduled mode notice a
+  // time-of-day boundary passing without a dedicated timer of its own.
+  applyWallpaperMode();
+
   // "Days until" only ever changes at midnight - no need to recompute it
   // every second like the clock itself, just once per actual calendar-day
   // change (localDateKey(now) has already been computed indirectly by
@@ -1303,7 +1397,13 @@ function renderWeather(weather) {
   setText("weather-rain-text-lg", rainText);
   byId("weather-rain-lg")?.classList.toggle("hidden", !rainText);
 
-  if (nightOverride) {
+  // A set wallpaper wins outright, same as the accent color following the
+  // wallpaper rather than the weather in the original echo-dashboard -
+  // once a photo is showing, it makes more sense for the UI to pick up
+  // its color than to keep chasing the weather underneath it.
+  if (wallpaperAccentColor) {
+    document.documentElement.style.setProperty("--accent", wallpaperAccentColor);
+  } else if (nightOverride) {
     document.documentElement.style.setProperty("--accent", NIGHT_WEATHER_ACCENT);
   } else {
     applyAccentColor(weather.condition);
@@ -2685,6 +2785,461 @@ async function setupCustomSounds() {
     }
     renderSoundMachine();
   });
+}
+
+// ---------------------------------------------------------------------------
+// Wallpaper - photos you import yourself, stored locally in IndexedDB, same
+// "bring your own files" pattern as Custom Sounds above. Aurora used to
+// sync a phone photo library for this; there's no phone left, so the
+// import button is the library. Downscaled on import (resizeImageFile())
+// since a handful of full camera-resolution photos would eat a meaningful
+// chunk of an Echo Show 5's limited storage for no visual benefit on a
+// 960x480 screen. Three display modes - rotating (default), single, and a
+// time-of-day schedule - plus a plain solid-black override, all mirroring
+// the original echo-dashboard's wallpaper feature exactly; only where the
+// photos come from changed.
+// ---------------------------------------------------------------------------
+
+const WALLPAPER_DB_NAME = "aurora-dashboard-wallpapers";
+const WALLPAPER_STORE = "photos";
+const WALLPAPER_MAX_DIMENSION = 1600; // long edge, in px - comfortably above any real display this runs on
+const WALLPAPER_JPEG_QUALITY = 0.82;
+const WALLPAPER_ROTATION_INTERVAL_MS = 5 * 60 * 1000;
+
+const WALLPAPER_MODE_KEY = "aurora-dashboard:wallpaper-mode";
+const WALLPAPER_SINGLE_KEY = "aurora-dashboard:wallpaper-single";
+const WALLPAPER_SCHEDULE_KEY = "aurora-dashboard:wallpaper-schedule";
+const WALLPAPER_BLACK_KEY = "aurora-dashboard:wallpaper-black";
+
+let wallpaperPhotoIds = []; // metadata only, in import order - blobs stay in IndexedDB until actually shown
+let wallpaperObjectUrls = new Map(); // photoId -> blob: URL, created once per id and reused (thumbnails + full display alike)
+let wallpaperDbPromise = null;
+
+let wallpaperMode = localStorage.getItem(WALLPAPER_MODE_KEY) || "rotating";
+let wallpaperSingleId = localStorage.getItem(WALLPAPER_SINGLE_KEY) || null;
+let wallpaperSchedule = [];
+try {
+  wallpaperSchedule = JSON.parse(localStorage.getItem(WALLPAPER_SCHEDULE_KEY) || "[]");
+} catch (err) {
+  wallpaperSchedule = [];
+}
+let wallpaperForcedBlack = localStorage.getItem(WALLPAPER_BLACK_KEY) === "true";
+
+function openWallpaperDb() {
+  if (!window.indexedDB) return Promise.reject(new Error("IndexedDB not available"));
+  if (!wallpaperDbPromise) {
+    wallpaperDbPromise = new Promise((resolve, reject) => {
+      const request = indexedDB.open(WALLPAPER_DB_NAME, 1);
+      request.onupgradeneeded = () => {
+        request.result.createObjectStore(WALLPAPER_STORE, { keyPath: "id" });
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+  return wallpaperDbPromise;
+}
+
+async function saveWallpaperRecord(id, blob) {
+  const db = await openWallpaperDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(WALLPAPER_STORE, "readwrite");
+    tx.objectStore(WALLPAPER_STORE).put({ id, blob });
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+async function loadWallpaperRecord(id) {
+  const db = await openWallpaperDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(WALLPAPER_STORE, "readonly");
+    const request = tx.objectStore(WALLPAPER_STORE).get(id);
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function loadAllWallpaperRecords() {
+  const db = await openWallpaperDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(WALLPAPER_STORE, "readonly");
+    const request = tx.objectStore(WALLPAPER_STORE).getAll();
+    request.onsuccess = () => resolve(request.result || []);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function deleteWallpaperRecord(id) {
+  const db = await openWallpaperDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(WALLPAPER_STORE, "readwrite");
+    tx.objectStore(WALLPAPER_STORE).delete(id);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+/** Draws [file] into a canvas capped at WALLPAPER_MAX_DIMENSION on its
+ *  long edge (untouched if already smaller) and re-encodes as JPEG - a
+ *  4000x3000 camera photo has no business being stored at full size for a
+ *  960x480 kiosk display. */
+async function resizeImageFile(file) {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, WALLPAPER_MAX_DIMENSION / Math.max(bitmap.width, bitmap.height));
+  const width = Math.round(bitmap.width * scale);
+  const height = Math.round(bitmap.height * scale);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(bitmap, 0, 0, width, height);
+  bitmap.close();
+
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("toBlob failed"))), "image/jpeg", WALLPAPER_JPEG_QUALITY);
+  });
+}
+
+/** Same cache-once-reuse-everywhere shape as loadSoundBuffer()'s
+ *  bufferCache - a photo's object URL is created at most once, whether
+ *  it's being drawn full-screen or as a tiny Settings-grid thumbnail. */
+async function wallpaperObjectUrl(id) {
+  if (wallpaperObjectUrls.has(id)) return wallpaperObjectUrls.get(id);
+  const record = await loadWallpaperRecord(id);
+  if (!record) return null;
+  const url = URL.createObjectURL(record.blob);
+  wallpaperObjectUrls.set(id, url);
+  return url;
+}
+
+async function importWallpaperFiles(fileList) {
+  const skipped = [];
+  for (const file of Array.from(fileList)) {
+    if (!file.type.startsWith("image/")) {
+      skipped.push(file.name);
+      continue;
+    }
+    const id = `wallpaper_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    try {
+      const resized = await resizeImageFile(file);
+      await saveWallpaperRecord(id, resized);
+      wallpaperPhotoIds.push(id);
+    } catch (err) {
+      skipped.push(file.name);
+    }
+  }
+
+  renderWallpaperSettings();
+  applyWallpaperMode();
+
+  showWallpaperImportHint(skipped.length > 0 ? `Skipped ${skipped.join(", ")} - couldn't be read as an image.` : "");
+}
+
+function showWallpaperImportHint(text) {
+  const hint = byId("wallpaper-import-hint");
+  if (!hint) return;
+  hint.textContent = text;
+  hint.classList.toggle("hidden", !text);
+}
+
+let wallpaperPhotoIndex = -1;
+let wallpaperActiveLayer = "a";
+let wallpaperRotationHandle = null;
+let currentWallpaperPhotoId = null;
+
+/** Crossfades to [photoId] - a no-op if it's already showing, so calling
+ *  this on every clock tick (single/scheduled modes - see applyWallpaperMode())
+ *  doesn't restart the fade or re-derive the same object URL. Shared by
+ *  rotating/single/scheduled so there's exactly one crossfade + accent-
+ *  color implementation. */
+async function showWallpaperPhoto(photoId) {
+  if (!photoId || photoId === currentWallpaperPhotoId) return;
+  const url = await wallpaperObjectUrl(photoId);
+  if (!url) return;
+
+  const img = new Image();
+  const loaded = await new Promise((resolve) => {
+    img.onload = () => resolve(true);
+    img.onerror = () => resolve(false);
+    img.src = url;
+  });
+  if (!loaded) return;
+
+  const nextLayer = byId(wallpaperActiveLayer === "a" ? "wallpaper-bg-b" : "wallpaper-bg-a");
+  const prevLayer = byId(wallpaperActiveLayer === "a" ? "wallpaper-bg-a" : "wallpaper-bg-b");
+  if (!nextLayer || !prevLayer) return;
+
+  nextLayer.style.backgroundImage = `url("${url}")`;
+  nextLayer.classList.add("visible");
+  prevLayer.classList.remove("visible");
+  wallpaperActiveLayer = wallpaperActiveLayer === "a" ? "b" : "a";
+  currentWallpaperPhotoId = photoId;
+
+  wallpaperAccentColor = extractWallpaperAccentColor(img);
+  if (lastWeatherData) renderWeather(lastWeatherData); // re-runs the accent precedence check with the new color
+}
+
+async function showNextWallpaperPhoto() {
+  if (wallpaperPhotoIds.length === 0) return;
+  wallpaperPhotoIndex = (wallpaperPhotoIndex + 1) % wallpaperPhotoIds.length;
+  await showWallpaperPhoto(wallpaperPhotoIds[wallpaperPhotoIndex]);
+}
+
+function stopWallpaperRotation() {
+  clearInterval(wallpaperRotationHandle);
+  wallpaperRotationHandle = null;
+}
+
+function startWallpaperRotation() {
+  if (wallpaperPhotoIds.length === 0) return; // No photos imported yet - leave the layer empty.
+  if (wallpaperRotationHandle) return; // Already rotating - calling this again shouldn't reset the timer.
+  showNextWallpaperPhoto();
+  wallpaperRotationHandle = setInterval(showNextWallpaperPhoto, WALLPAPER_ROTATION_INTERVAL_MS);
+}
+
+/** [entries] must already be sorted by time ascending. Picks whichever
+ *  entry's time-of-day has most recently passed, wrapping around to the
+ *  last entry if none have fired yet today - so a schedule always covers
+ *  the full 24 hours with no gaps to configure by hand. */
+function activeScheduledPhotoId(entries) {
+  if (!entries || entries.length === 0) return null;
+  const nowMinutes = currentMinutesInTimezone(currentTimezone || undefined);
+  let active = entries[entries.length - 1];
+  for (const entry of entries) {
+    if (minutesFromHHMM(entry.time) > nowMinutes) break;
+    active = entry;
+  }
+  return active.photoId;
+}
+
+/** Hides whatever photo is currently showing and drops the wallpaper-
+ *  driven accent color back to weather-driven - shared by the black-
+ *  background override and by switching modes, so neither has to wait for
+ *  the next photo to load before the display looks right again. */
+function clearWallpaperLayers() {
+  byId("wallpaper-bg-a")?.classList.remove("visible");
+  byId("wallpaper-bg-b")?.classList.remove("visible");
+  currentWallpaperPhotoId = null;
+  wallpaperAccentColor = null;
+  if (lastWeatherData) renderWeather(lastWeatherData);
+}
+
+/** Called from updateClock() every tick - cheap and idempotent either way
+ *  (showWallpaperPhoto() no-ops once the right photo is already showing),
+ *  which is what lets Scheduled mode notice a time-of-day boundary
+ *  passing without a dedicated timer of its own. The black-background
+ *  override short-circuits all of this - the mode/single/schedule state
+ *  underneath is left completely alone, so turning the override off
+ *  resumes exactly where it was. */
+function applyWallpaperMode() {
+  if (wallpaperForcedBlack) {
+    stopWallpaperRotation();
+    if (currentWallpaperPhotoId) clearWallpaperLayers();
+    return;
+  }
+  if (wallpaperPhotoIds.length === 0) {
+    stopWallpaperRotation();
+    return;
+  }
+  if (wallpaperMode === "single") {
+    stopWallpaperRotation();
+    showWallpaperPhoto(wallpaperSingleId && wallpaperPhotoIds.includes(wallpaperSingleId) ? wallpaperSingleId : wallpaperPhotoIds[0]);
+  } else if (wallpaperMode === "scheduled") {
+    stopWallpaperRotation();
+    showWallpaperPhoto(activeScheduledPhotoId(wallpaperSchedule));
+  } else {
+    startWallpaperRotation();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Wallpaper settings (Settings page) - the write side of wallpaperMode/
+// wallpaperSingleId/wallpaperSchedule above, plus the one thing the
+// original echo-dashboard never needed a UI for: actually deleting a
+// photo from the library. There, the library was managed on the Aurora
+// phone app; here, this IS where photos get imported, so each thumbnail
+// gets its own small remove badge in the corner alongside the tap-to-
+// select behavior the grid already has.
+// ---------------------------------------------------------------------------
+
+// Which photo the schedule "Add" row will use next - a photo grid tap
+// means something different depending on mode (see setupWallpaperSettings):
+// an immediate single-photo selection in Single mode, vs just staging a
+// selection here in Scheduled mode until a time is picked and "Add" is
+// pressed.
+let wallpaperPendingPhotoId = null;
+
+async function renderWallpaperPhotoGrid() {
+  const grid = byId("wallpaper-photo-grid");
+  if (!grid) return;
+  if (wallpaperPhotoIds.length === 0) {
+    grid.innerHTML = '<div class="settings-photo-empty">No photos imported yet</div>';
+    return;
+  }
+  const selectedId = wallpaperMode === "single" ? wallpaperSingleId : wallpaperPendingPhotoId;
+  const urls = await Promise.all(wallpaperPhotoIds.map((id) => wallpaperObjectUrl(id)));
+  grid.innerHTML = wallpaperPhotoIds
+    .map((id, i) => {
+      const active = id === selectedId;
+      return `<div class="settings-photo-thumb-wrap">
+          <button class="settings-photo-thumb${active ? " active" : ""}" type="button" data-photo-id="${escapeHtml(id)}" style="background-image:url('${urls[i]}')" aria-label="Select photo"></button>
+          <button class="settings-photo-thumb-remove" type="button" data-photo-id="${escapeHtml(id)}" aria-label="Remove photo">${ICONS.close}</button>
+        </div>`;
+    })
+    .join("");
+}
+
+async function renderWallpaperSchedule() {
+  const list = byId("wallpaper-schedule-list");
+  if (!list) return;
+  if (wallpaperSchedule.length === 0) {
+    list.innerHTML = '<div class="settings-photo-empty">No scheduled entries yet</div>';
+    return;
+  }
+  const urls = await Promise.all(wallpaperSchedule.map((entry) => wallpaperObjectUrl(entry.photoId)));
+  list.innerHTML = wallpaperSchedule
+    .map(
+      (entry, i) => `<div class="settings-schedule-row" data-photo-id="${escapeHtml(entry.photoId)}" data-time="${escapeHtml(entry.time)}">
+          <span class="settings-photo-thumb" style="background-image:url('${urls[i]}')"></span>
+          <span class="settings-schedule-time">${escapeHtml(formatTimeOfDay(entry.time))}</span>
+          <button class="settings-schedule-remove" type="button" aria-label="Remove scheduled entry">&times;</button>
+        </div>`
+    )
+    .join("");
+}
+
+function renderWallpaperSettings() {
+  const segmented = byId("wallpaper-mode-segmented");
+  if (!segmented) return;
+
+  segmented.querySelectorAll(".settings-segment").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.mode === wallpaperMode);
+  });
+
+  const isScheduled = wallpaperMode === "scheduled";
+  byId("wallpaper-schedule-add-row")?.classList.toggle("hidden", !isScheduled);
+  byId("wallpaper-schedule-list")?.classList.toggle("hidden", !isScheduled);
+
+  renderWallpaperPhotoGrid();
+  renderWallpaperSchedule();
+
+  byId("wallpaper-black-toggle")?.setAttribute("aria-checked", String(wallpaperForcedBlack));
+}
+
+async function setupWallpaperSettings() {
+  const importInput = byId("wallpaper-import-input");
+  const importLabel = byId("wallpaper-import-label");
+  const segmented = byId("wallpaper-mode-segmented");
+  if (!segmented) return;
+
+  if (!window.indexedDB) {
+    // Degrade gracefully rather than offering a control that can't work -
+    // same "hide, don't half-work" philosophy as Custom Sounds above.
+    importLabel?.classList.add("hidden");
+    showWallpaperImportHint("Wallpaper needs IndexedDB, which this browser doesn't support.");
+    return;
+  }
+
+  try {
+    const records = await loadAllWallpaperRecords();
+    wallpaperPhotoIds = records.map((r) => r.id);
+  } catch (err) {
+    wallpaperPhotoIds = [];
+  }
+  renderWallpaperSettings();
+  applyWallpaperMode();
+
+  importInput?.addEventListener("change", async (event) => {
+    const files = event.target.files;
+    if (files && files.length > 0) await importWallpaperFiles(files);
+    event.target.value = ""; // lets the same filename be re-imported later
+  });
+
+  segmented.addEventListener("click", (event) => {
+    const btn = event.target.closest(".settings-segment");
+    if (!btn) return;
+    wallpaperMode = btn.dataset.mode;
+    localStorage.setItem(WALLPAPER_MODE_KEY, wallpaperMode);
+    renderWallpaperSettings();
+    applyWallpaperMode();
+  });
+
+  byId("wallpaper-photo-grid")?.addEventListener("click", async (event) => {
+    const removeBtn = event.target.closest(".settings-photo-thumb-remove");
+    if (removeBtn) {
+      const id = removeBtn.dataset.photoId;
+      await deleteWallpaperRecord(id);
+      wallpaperPhotoIds = wallpaperPhotoIds.filter((p) => p !== id);
+      wallpaperSchedule = wallpaperSchedule.filter((entry) => entry.photoId !== id);
+      localStorage.setItem(WALLPAPER_SCHEDULE_KEY, JSON.stringify(wallpaperSchedule));
+      const url = wallpaperObjectUrls.get(id);
+      if (url) URL.revokeObjectURL(url);
+      wallpaperObjectUrls.delete(id);
+      if (wallpaperSingleId === id) {
+        wallpaperSingleId = null;
+        localStorage.removeItem(WALLPAPER_SINGLE_KEY);
+      }
+      if (wallpaperPendingPhotoId === id) wallpaperPendingPhotoId = null;
+      // A deleted photo that's currently showing has to actually clear -
+      // its object URL is gone, so any further reference to it would 404.
+      if (currentWallpaperPhotoId === id) clearWallpaperLayers();
+      renderWallpaperSettings();
+      applyWallpaperMode();
+      return;
+    }
+
+    const thumb = event.target.closest(".settings-photo-thumb");
+    if (!thumb) return;
+    const photoId = thumb.dataset.photoId;
+    if (wallpaperMode === "scheduled") {
+      wallpaperPendingPhotoId = photoId;
+      renderWallpaperPhotoGrid();
+    } else {
+      wallpaperSingleId = photoId;
+      localStorage.setItem(WALLPAPER_SINGLE_KEY, photoId);
+      renderWallpaperPhotoGrid();
+      applyWallpaperMode();
+    }
+  });
+
+  byId("wallpaper-schedule-add-btn")?.addEventListener("click", () => {
+    const time = byId("wallpaper-schedule-time")?.value;
+    if (!time || !wallpaperPendingPhotoId) return;
+    wallpaperSchedule = [...wallpaperSchedule, { photoId: wallpaperPendingPhotoId, time }].sort((a, b) => a.time.localeCompare(b.time));
+    localStorage.setItem(WALLPAPER_SCHEDULE_KEY, JSON.stringify(wallpaperSchedule));
+    renderWallpaperSchedule();
+    applyWallpaperMode();
+  });
+
+  byId("wallpaper-schedule-list")?.addEventListener("click", (event) => {
+    const removeBtn = event.target.closest(".settings-schedule-remove");
+    if (!removeBtn) return;
+    const row = removeBtn.closest(".settings-schedule-row");
+    wallpaperSchedule = wallpaperSchedule.filter(
+      (entry) => !(entry.photoId === row.dataset.photoId && entry.time === row.dataset.time)
+    );
+    localStorage.setItem(WALLPAPER_SCHEDULE_KEY, JSON.stringify(wallpaperSchedule));
+    renderWallpaperSchedule();
+    applyWallpaperMode();
+  });
+
+  const blackToggle = byId("wallpaper-black-toggle");
+  if (blackToggle) {
+    blackToggle.setAttribute("aria-checked", String(wallpaperForcedBlack));
+    blackToggle.addEventListener("click", () => {
+      wallpaperForcedBlack = !wallpaperForcedBlack;
+      blackToggle.setAttribute("aria-checked", String(wallpaperForcedBlack));
+      localStorage.setItem(WALLPAPER_BLACK_KEY, String(wallpaperForcedBlack));
+      if (wallpaperForcedBlack) {
+        applyWallpaperMode();
+      } else {
+        currentWallpaperPhotoId = null; // forces showWallpaperPhoto() to actually redraw, not no-op
+        applyWallpaperMode();
+      }
+    });
+  }
 }
 
 /**
@@ -5260,6 +5815,7 @@ function init() {
   setupAutoBedsideSetting();
   setupBedsideAutoSoundSetting();
   setupLayoutSettings();
+  setupWallpaperSettings();
   setupWeatherBgSettings();
   setupAmbientTimeoutSetting();
   setupWorldClock();

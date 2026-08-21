@@ -21,16 +21,17 @@ sync. Not everyone wants to dedicate a phone to a bedside display. This
 fork answers "what's left, and what can replace it?"
 
 **Dropped entirely** (no substitute exists without a phone): notifications,
-Do Not Disturb, phone battery, phone-imported photos/wallpaper, synced
-calendar.
+Do Not Disturb, phone battery, synced calendar.
 
 **Rebuilt as fully self-contained** (the same feature, with no server
 behind it): Wake Alarms (scheduled and rung with a local timer instead of
 Android's AlarmManager), the Sound Machine (procedurally-generated
 white/pink/brown noise, rain, ocean waves, and an alarm chime — no audio
 files to bundle or stream), weather (fetched directly from Open-Meteo and
-the National Weather Service, both free and keyless), and Dashboard
-Layout (a local preference instead of something the phone app configured).
+the National Weather Service, both free and keyless), Wallpaper (photos
+imported straight into the browser instead of synced from a phone photo
+library), and Dashboard Layout (a local preference instead of something
+the phone app configured).
 
 **New, to make up for what's gone**: a manually-kept Agenda in place of
 calendar sync, a proper rendered moon-phase visual, a World Clock, a
@@ -81,6 +82,14 @@ over unchanged.
   ringtone — this is the actual way to get real, non-synthesized audio
   onto the dashboard, rather than this fork trying to source and bundle
   audio of uncertain size and licensing.
+- **Wallpaper**: import your own photos (Settings → Wallpaper) — each one
+  downscaled to a sane size on import and stored locally in IndexedDB, no
+  phone photo library involved. Rotate through the whole set, pin one
+  fixed photo, or set a time-of-day schedule; a "solid black background"
+  toggle overrides any of the three without touching the imported library.
+  The dashboard's accent color follows whichever photo is showing (a
+  downsampled color-average, boosted to a usable UI tone) the same way it
+  otherwise follows the weather.
 - **Bedside Mode**: one tap starts rain (optional — toggle "Play sound
   automatically" off in Settings for just the dimming/quiet clock), dims
   the display to a comfortable 50% (adjustable live via an on-screen

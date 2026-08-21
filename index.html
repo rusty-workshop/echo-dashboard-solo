@@ -25,7 +25,7 @@
     kept list instead of a synced calendar. See script.js's header comment
     for the full picture.
 
-    Six swipeable pages via CSS scroll-snap (no JS needed for the swipe
+    Eight swipeable pages via CSS scroll-snap (no JS needed for the swipe
     itself - the WebView's native touch scrolling handles it, which is
     both simpler and smoother than a JS-driven carousel). script.js's
     setupPager() just keeps the dot indicators in sync and lets a dot tap
@@ -43,6 +43,17 @@
        setupReadingMode() in script.js). Sits above the weather effect but
        pointer-events:none, so it's purely visual. -->
   <div class="reading-mode-overlay hidden" id="reading-mode-overlay" aria-hidden="true"></div>
+  <!-- Wallpaper - photos imported via Settings, stored in IndexedDB (see
+       the "Wallpaper" section in script.js). Empty/black until the first
+       import; sits one z-index below the weather effect layer so
+       rain/snow/stars still animate on top of it. Two stacked layers
+       crossfade between photos, same technique as the weather effect's
+       own layered elements. -->
+  <div class="wallpaper-bg" id="wallpaper-bg" aria-hidden="true">
+    <div class="wallpaper-photo-layer" id="wallpaper-bg-a"></div>
+    <div class="wallpaper-photo-layer" id="wallpaper-bg-b"></div>
+    <div class="wallpaper-scrim"></div>
+  </div>
   <div class="weather-bg" id="weather-bg" aria-hidden="true">
     <div class="weather-moon-glow"></div>
     <div class="weather-sun-glow"></div>
@@ -505,6 +516,30 @@
         <label class="settings-add-btn settings-file-label" id="customsound-import-label" for="customsound-import-input">Import Sound Files</label>
         <input type="file" id="customsound-import-input" accept="audio/*" multiple class="settings-file-input" />
         <div class="settings-text-hint hidden" id="customsound-import-hint"></div>
+      </div>
+
+      <div class="settings-section">
+        <h2 class="settings-title">Wallpaper</h2>
+        <div class="settings-text-hint">Import your own photos - they're downscaled and stored locally, no phone needed.</div>
+        <div class="settings-segmented" id="wallpaper-mode-segmented" role="radiogroup" aria-label="Wallpaper mode">
+          <button class="settings-segment" type="button" data-mode="rotating">Rotate</button>
+          <button class="settings-segment" type="button" data-mode="single">Single</button>
+          <button class="settings-segment" type="button" data-mode="scheduled">Schedule</button>
+        </div>
+        <div class="settings-photo-grid" id="wallpaper-photo-grid"></div>
+        <label class="settings-add-btn settings-file-label" id="wallpaper-import-label" for="wallpaper-import-input">Import Photos</label>
+        <input type="file" id="wallpaper-import-input" accept="image/*" multiple class="settings-file-input" />
+        <div class="settings-text-hint hidden" id="wallpaper-import-hint"></div>
+        <div class="settings-schedule-add-row hidden" id="wallpaper-schedule-add-row">
+          <input type="time" id="wallpaper-schedule-time" class="settings-text-input" aria-label="Time for scheduled photo" />
+          <button class="settings-add-btn" type="button" id="wallpaper-schedule-add-btn">Add</button>
+        </div>
+        <div class="settings-schedule-list hidden" id="wallpaper-schedule-list"></div>
+        <div class="settings-text-row">
+          <span class="settings-text-label">Solid black background</span>
+          <button class="settings-switch" id="wallpaper-black-toggle" role="switch" aria-checked="false" aria-label="Use a solid black background instead of photos"></button>
+        </div>
+        <div class="settings-text-hint">Overrides Rotate/Single/Schedule above with plain black - your photo library stays untouched.</div>
       </div>
 
       <div class="settings-section">
