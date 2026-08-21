@@ -65,6 +65,8 @@ const TILE_DOM_ID = {
   sound: "card-sound",
   worldclock: "card-worldclock",
   countdown: "card-countdown",
+  nightroutine: "card-nightroutine",
+  habits: "card-habits",
 };
 
 const TILE_SIZE_WEIGHT = { small: 0.7, medium: 1, large: 1.5 };
@@ -76,6 +78,8 @@ const DEFAULT_TILE_LAYOUT = [
   { id: "sound", visible: true, size: "large" },
   { id: "worldclock", visible: false, size: "small" },
   { id: "countdown", visible: false, size: "small" },
+  { id: "nightroutine", visible: false, size: "small" },
+  { id: "habits", visible: false, size: "small" },
 ];
 
 const LAYOUT_KEY = "aurora-dashboard:layout";
@@ -148,6 +152,10 @@ const ICONS = {
   calculator:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 6h8"/><circle cx="8" cy="11" r="0.9" fill="currentColor" stroke="none"/><circle cx="12" cy="11" r="0.9" fill="currentColor" stroke="none"/><circle cx="16" cy="11" r="0.9" fill="currentColor" stroke="none"/><circle cx="8" cy="15" r="0.9" fill="currentColor" stroke="none"/><circle cx="12" cy="15" r="0.9" fill="currentColor" stroke="none"/><circle cx="16" cy="15" r="0.9" fill="currentColor" stroke="none"/><circle cx="8" cy="19" r="0.9" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="0.9" fill="currentColor" stroke="none"/><circle cx="16" cy="19" r="0.9" fill="currentColor" stroke="none"/></svg>',
   swap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v13M7 4L3 8M7 4l4 4"/><path d="M17 20V7M17 20l4-4M17 20l-4-4"/></svg>',
+  checklist:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6l1.5 1.5L7 5"/><path d="M3 12l1.5 1.5L7 11"/><path d="M3 18l1.5 1.5L7 17"/><path d="M11 6h10M11 12h10M11 18h10"/></svg>',
+  flame:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15.36 5.21A8.25 8.25 0 0 1 12 21a8.25 8.25 0 0 1-5.96-13.95A8.29 8.29 0 0 0 9 9.6a9 9 0 0 1 3.36-6.87 8.2 8.2 0 0 0 3 2.48z"/><path d="M12 18a3.75 3.75 0 0 0 .5-7.47 6 6 0 0 0-1.93 3.55 6 6 0 0 1-2.13-1A3.75 3.75 0 0 0 12 18z"/></svg>',
 };
 
 // ---------------------------------------------------------------------------
@@ -1168,6 +1176,15 @@ function updateClock() {
   if (todayKeyForCountdown !== lastCountdownRenderDateKey) {
     lastCountdownRenderDateKey = todayKeyForCountdown;
     renderCountdowns();
+    // Night Routine's checked boxes and the Word Scramble's solved state
+    // both need to reset at the same midnight boundary, or an overnight
+    // kiosk display would keep showing yesterday's checkmarks/solved word
+    // until something else happened to trigger a re-render. Habits doesn't
+    // reset any state (the log is additive), but "checked today" and every
+    // streak count still shift at midnight, so it needs the same nudge.
+    renderNightRoutine();
+    renderHabits();
+    renderWordPuzzle();
   }
 }
 
@@ -1892,6 +1909,8 @@ const TILE_LABELS = {
   sound: "Sound Machine",
   worldclock: "World Clock",
   countdown: "Countdown",
+  nightroutine: "Night Routine",
+  habits: "Habits",
 };
 
 let lastLayoutTiles = null;
@@ -1946,6 +1965,18 @@ function saveLayoutUpdate(tiles) {
   localStorage.setItem(LAYOUT_KEY, JSON.stringify(tiles));
   renderLayoutSettings(tiles);
   applyTileLayout(tiles);
+
+  // World Clock self-heals within a second either way (updateClock() calls
+  // renderWorldClocks() every tick), but Countdown/Night Routine/Habits
+  // only re-render on a CRUD action or the once-a-day boundary check - so
+  // switching one of them on here wouldn't actually show anything until
+  // one of those happened to fire. Cheap and idempotent, so just always
+  // refresh all four the moment a layout change lands, rather than leaving
+  // a newly-visible tile blank until something else happens to trigger it.
+  renderWorldClocks();
+  renderCountdowns();
+  renderNightRoutine();
+  renderHabits();
 }
 
 function setupLayoutSettings() {
@@ -3746,6 +3777,297 @@ function setupCountdown() {
 }
 
 // ---------------------------------------------------------------------------
+// Night Routine - an optional Overview tile (off by default, like World
+// Clock/Countdown) showing a small user-defined checklist that resets
+// itself once a day. Ships with three starter items so it's immediately
+// useful the moment it's turned on, rather than opening to a blank list -
+// unlike Countdown/World Clock, which are inherently personal data with no
+// sane default. That starter set is a first-run default only: once
+// NIGHT_ROUTINE_ITEMS_KEY exists at all (even as an empty array, after a
+// user deletes everything), it's never repopulated - an intentionally
+// emptied list has to stay empty.
+// ---------------------------------------------------------------------------
+
+const NIGHT_ROUTINE_ITEMS_KEY = "aurora-dashboard:night-routine-items";
+const NIGHT_ROUTINE_STATE_KEY = "aurora-dashboard:night-routine-state";
+const DEFAULT_NIGHT_ROUTINE_ITEMS = [
+  { id: "nr-doors", label: "Doors locked" },
+  { id: "nr-alarm", label: "Alarm set for tomorrow" },
+  { id: "nr-charging", label: "Phone charging" },
+];
+
+function loadNightRoutineItems() {
+  try {
+    const raw = localStorage.getItem(NIGHT_ROUTINE_ITEMS_KEY);
+    if (raw === null) return DEFAULT_NIGHT_ROUTINE_ITEMS;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : DEFAULT_NIGHT_ROUTINE_ITEMS;
+  } catch (err) {
+    return DEFAULT_NIGHT_ROUTINE_ITEMS;
+  }
+}
+
+let nightRoutineItems = loadNightRoutineItems();
+
+function saveNightRoutineItems() {
+  localStorage.setItem(NIGHT_ROUTINE_ITEMS_KEY, JSON.stringify(nightRoutineItems));
+}
+
+function loadNightRoutineState() {
+  try {
+    const raw = localStorage.getItem(NIGHT_ROUTINE_STATE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed && Array.isArray(parsed.checkedIds) ? parsed : { dateKey: "", checkedIds: [] };
+  } catch (err) {
+    return { dateKey: "", checkedIds: [] };
+  }
+}
+
+let nightRoutineState = loadNightRoutineState();
+
+function saveNightRoutineState() {
+  localStorage.setItem(NIGHT_ROUTINE_STATE_KEY, JSON.stringify(nightRoutineState));
+}
+
+/** Resets checkedIds back to empty the first time this runs on a new
+ *  calendar day - a fresh checklist to fill in each night, same as a
+ *  paper one would be. */
+function ensureNightRoutineStateForToday() {
+  const todayKey = localDateKey(new Date());
+  if (nightRoutineState.dateKey === todayKey) return;
+  nightRoutineState = { dateKey: todayKey, checkedIds: [] };
+  saveNightRoutineState();
+}
+
+function renderNightRoutine() {
+  const list = byId("nightroutine-list");
+  if (!list) return;
+  ensureNightRoutineStateForToday();
+  setIcon("nightroutine-title-icon", "checklist");
+
+  if (nightRoutineItems.length === 0) {
+    list.innerHTML = '<div class="worldclock-empty">Add a routine item in Settings</div>';
+    setText("nightroutine-progress", "");
+    return;
+  }
+
+  const checkedSet = new Set(nightRoutineState.checkedIds);
+  list.innerHTML = nightRoutineItems
+    .map(
+      (item) => `<label class="nightroutine-row">
+        <input type="checkbox" class="nightroutine-checkbox" data-id="${escapeHtml(item.id)}" ${checkedSet.has(item.id) ? "checked" : ""} />
+        <span class="${checkedSet.has(item.id) ? "nightroutine-label nightroutine-label-done" : "nightroutine-label"}">${escapeHtml(item.label)}</span>
+      </label>`
+    )
+    .join("");
+  setText("nightroutine-progress", `${checkedSet.size}/${nightRoutineItems.length}`);
+}
+
+function renderNightRoutineSettings() {
+  const list = byId("settings-nightroutine-list");
+  if (!list) return;
+  if (nightRoutineItems.length === 0) {
+    list.innerHTML = '<div class="settings-app-empty">No routine items yet</div>';
+    return;
+  }
+  list.innerHTML = nightRoutineItems
+    .map(
+      (item, index) => `<div class="settings-app-row" data-index="${index}">
+        <span class="settings-app-label">${escapeHtml(item.label)}</span>
+        <button class="icon-button nightroutine-remove" type="button" aria-label="Remove ${escapeHtml(item.label)}">
+          <span class="icon-slot small" aria-hidden="true">${ICONS.close}</span>
+        </button>
+      </div>`
+    )
+    .join("");
+}
+
+function setupNightRoutine() {
+  renderNightRoutine();
+  renderNightRoutineSettings();
+
+  byId("nightroutine-list")?.addEventListener("change", (event) => {
+    const checkbox = event.target.closest(".nightroutine-checkbox");
+    if (!checkbox) return;
+    ensureNightRoutineStateForToday();
+    const id = checkbox.dataset.id;
+    const checkedSet = new Set(nightRoutineState.checkedIds);
+    if (checkbox.checked) checkedSet.add(id);
+    else checkedSet.delete(id);
+    nightRoutineState.checkedIds = [...checkedSet];
+    saveNightRoutineState();
+    renderNightRoutine();
+  });
+
+  byId("nightroutine-add-btn")?.addEventListener("click", () => {
+    const input = byId("nightroutine-add-label");
+    const label = input?.value.trim();
+    if (!label) return;
+    nightRoutineItems.push({ id: `nr-${Date.now()}`, label });
+    saveNightRoutineItems();
+    renderNightRoutine();
+    renderNightRoutineSettings();
+    if (input) input.value = "";
+  });
+
+  byId("settings-nightroutine-list")?.addEventListener("click", (event) => {
+    const removeBtn = event.target.closest(".nightroutine-remove");
+    if (!removeBtn) return;
+    const index = Number(removeBtn.closest("[data-index]")?.dataset.index);
+    if (Number.isNaN(index)) return;
+    nightRoutineItems.splice(index, 1);
+    saveNightRoutineItems();
+    renderNightRoutine();
+    renderNightRoutineSettings();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Habits - an optional Overview tile (off by default), a short user-defined
+// list of daily habits with a streak count. No starter defaults, unlike
+// Night Routine - habits are entirely personal, there's no sane universal
+// set to pre-fill. habitStreak() counts backward from today, but doesn't
+// break the streak just because today itself hasn't been checked off yet
+// (it starts counting from yesterday instead in that case) - otherwise a
+// genuinely intact streak would read as broken all morning, every single
+// day, until the habit gets checked.
+// ---------------------------------------------------------------------------
+
+const HABITS_KEY = "aurora-dashboard:habits";
+const HABIT_LOG_KEY = "aurora-dashboard:habit-log";
+
+function loadHabits() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(HABITS_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+    return [];
+  }
+}
+
+let habits = loadHabits();
+
+function saveHabits() {
+  localStorage.setItem(HABITS_KEY, JSON.stringify(habits));
+}
+
+function loadHabitLog() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(HABIT_LOG_KEY) || "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (err) {
+    return {};
+  }
+}
+
+let habitLog = loadHabitLog();
+
+function saveHabitLog() {
+  localStorage.setItem(HABIT_LOG_KEY, JSON.stringify(habitLog));
+}
+
+function isHabitCheckedToday(habitId) {
+  return (habitLog[habitId] || []).includes(localDateKey(new Date()));
+}
+
+function toggleHabitToday(habitId) {
+  const todayKey = localDateKey(new Date());
+  const dates = new Set(habitLog[habitId] || []);
+  if (dates.has(todayKey)) dates.delete(todayKey);
+  else dates.add(todayKey);
+  habitLog[habitId] = [...dates];
+  saveHabitLog();
+}
+
+function habitStreak(habitId) {
+  const dates = new Set(habitLog[habitId] || []);
+  const cursor = new Date();
+  if (!dates.has(localDateKey(cursor))) cursor.setDate(cursor.getDate() - 1);
+  let streak = 0;
+  while (dates.has(localDateKey(cursor))) {
+    streak++;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return streak;
+}
+
+function renderHabits() {
+  const list = byId("habits-list");
+  if (!list) return;
+  setIcon("habits-title-icon", "flame");
+
+  if (habits.length === 0) {
+    list.innerHTML = '<div class="worldclock-empty">Add a habit in Settings</div>';
+    return;
+  }
+
+  list.innerHTML = habits
+    .map((habit) => {
+      const checked = isHabitCheckedToday(habit.id);
+      const streak = habitStreak(habit.id);
+      return `<label class="habit-row">
+        <input type="checkbox" class="habit-checkbox" data-id="${escapeHtml(habit.id)}" ${checked ? "checked" : ""} />
+        <span class="${checked ? "habit-label habit-label-done" : "habit-label"}">${escapeHtml(habit.label)}</span>
+        ${streak > 0 ? `<span class="habit-streak"><span class="icon-slot tiny" aria-hidden="true">${ICONS.flame}</span>${streak}</span>` : ""}
+      </label>`;
+    })
+    .join("");
+}
+
+function renderHabitsSettings() {
+  const list = byId("settings-habits-list");
+  if (!list) return;
+  if (habits.length === 0) {
+    list.innerHTML = '<div class="settings-app-empty">No habits yet</div>';
+    return;
+  }
+  list.innerHTML = habits
+    .map(
+      (habit, index) => `<div class="settings-app-row" data-index="${index}">
+        <span class="settings-app-label">${escapeHtml(habit.label)}</span>
+        <button class="icon-button habit-remove" type="button" aria-label="Remove ${escapeHtml(habit.label)}">
+          <span class="icon-slot small" aria-hidden="true">${ICONS.close}</span>
+        </button>
+      </div>`
+    )
+    .join("");
+}
+
+function setupHabits() {
+  renderHabits();
+  renderHabitsSettings();
+
+  byId("habits-list")?.addEventListener("change", (event) => {
+    const checkbox = event.target.closest(".habit-checkbox");
+    if (!checkbox) return;
+    toggleHabitToday(checkbox.dataset.id);
+    renderHabits();
+  });
+
+  byId("habits-add-btn")?.addEventListener("click", () => {
+    const input = byId("habits-add-label");
+    const label = input?.value.trim();
+    if (!label) return;
+    habits.push({ id: `habit-${Date.now()}`, label });
+    saveHabits();
+    renderHabits();
+    renderHabitsSettings();
+    if (input) input.value = "";
+  });
+
+  byId("settings-habits-list")?.addEventListener("click", (event) => {
+    const removeBtn = event.target.closest(".habit-remove");
+    if (!removeBtn) return;
+    const index = Number(removeBtn.closest("[data-index]")?.dataset.index);
+    if (Number.isNaN(index)) return;
+    habits.splice(index, 1);
+    saveHabits();
+    renderHabits();
+    renderHabitsSettings();
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Weather - fetched directly from two free, unauthenticated, CORS-enabled
 // public APIs (Open-Meteo and the National Weather Service) instead of
 // proxied through Aurora, which no longer exists. Same fixed home
@@ -4675,6 +4997,226 @@ async function loadTodayInHistory() {
 }
 
 // ---------------------------------------------------------------------------
+// Journal - one short entry a night, keyed by date. Pure localStorage, no
+// network. The point isn't the entry itself so much as what it becomes a
+// year later: journalEntryOneYearAgo() surfaces whatever was written on
+// this same month/day last year, right above tonight's blank box - the one
+// feature on this dashboard that gets more valuable the longer it's used
+// instead of just repeating the same view every day.
+// ---------------------------------------------------------------------------
+
+const JOURNAL_KEY = "aurora-dashboard:journal";
+const JOURNAL_SAVE_DEBOUNCE_MS = 600;
+
+function loadJournalEntries() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(JOURNAL_KEY) || "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch (err) {
+    return {};
+  }
+}
+
+let journalEntries = loadJournalEntries();
+let journalSaveHandle = null;
+
+function saveJournalEntries() {
+  localStorage.setItem(JOURNAL_KEY, JSON.stringify(journalEntries));
+}
+
+/** Looks up the entry from exactly one year before today's date - not
+ *  "365 days ago", so it still lands on the same calendar date across leap
+ *  years. */
+function journalEntryOneYearAgo() {
+  const d = new Date();
+  d.setFullYear(d.getFullYear() - 1);
+  return journalEntries[localDateKey(d)] || null;
+}
+
+function renderJournal() {
+  const textarea = byId("journal-textarea");
+  const callback = byId("journal-callback");
+  const callbackText = byId("journal-callback-text");
+  if (!textarea) return;
+
+  const todayKey = localDateKey(new Date());
+  if (document.activeElement !== textarea) {
+    textarea.value = journalEntries[todayKey] || "";
+  }
+
+  const lastYear = journalEntryOneYearAgo();
+  if (callback && callbackText) {
+    if (lastYear) {
+      callbackText.textContent = lastYear;
+      callback.classList.remove("hidden");
+    } else {
+      callback.classList.add("hidden");
+    }
+  }
+}
+
+function setupJournal() {
+  setIcon("journal-title-icon", "book");
+  renderJournal();
+
+  byId("journal-textarea")?.addEventListener("input", (event) => {
+    const todayKey = localDateKey(new Date());
+    const text = event.target.value;
+    if (journalSaveHandle) clearTimeout(journalSaveHandle);
+    journalSaveHandle = setTimeout(() => {
+      if (text.trim()) journalEntries[todayKey] = text;
+      else delete journalEntries[todayKey];
+      saveJournalEntries();
+    }, JOURNAL_SAVE_DEBOUNCE_MS);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Word Scramble - a tiny daily puzzle, same deterministic-by-date pattern
+// as the daily quote (dayOfYear() indexes a local word list, so it's the
+// same word all day for everyone and changes at midnight). The scramble
+// itself is seeded off that same day index via a small deterministic PRNG
+// (mulberry32) so reloading the page mid-guess doesn't reshuffle the
+// letters out from under an in-progress attempt.
+// ---------------------------------------------------------------------------
+
+const WORD_PUZZLE_WORDS = [
+  "PILLOW", "BLANKET", "MORNING", "COFFEE", "GARDEN", "WHISPER", "LANTERN",
+  "HARBOR", "MEADOW", "CANDLE", "JOURNEY", "AUTUMN", "STARLIT", "COZY",
+  "DRIFT", "SUNRISE", "TWILIGHT", "GENTLE", "QUIET", "PORCH", "BREEZE",
+  "ORCHARD", "VELVET", "AMBER", "HOLLOW", "RIPPLE", "FIREFLY", "HUMMING",
+  "COTTAGE", "MOSAIC", "WANDER", "SILVER", "MEANDER", "HORIZON", "PEBBLE",
+  "SATCHEL", "LULLABY", "MIDNIGHT", "FEATHER", "ANCHOR", "MELODY", "SUNSET",
+  "TIMBER", "CRICKET", "GRANITE", "WILLOW", "COMPASS", "BLOSSOM", "CRIMSON",
+  "SHELTER", "HARVEST",
+];
+
+const WORD_PUZZLE_STATE_KEY = "aurora-dashboard:word-puzzle-state";
+
+function mulberry32(seed) {
+  return function () {
+    seed |= 0;
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function todaysPuzzleWord() {
+  return WORD_PUZZLE_WORDS[dayOfYear(new Date()) % WORD_PUZZLE_WORDS.length];
+}
+
+/** Deterministic per-day shuffle - same seed (the day index) always
+ *  produces the same scramble, so it doesn't change between renders or
+ *  page reloads within the same day. Falls back to a plain reversal on the
+ *  rare chance the shuffle lands back on the original word. */
+function scrambleWord(word, seed) {
+  const letters = word.split("");
+  const rand = mulberry32(seed);
+  for (let i = letters.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [letters[i], letters[j]] = [letters[j], letters[i]];
+  }
+  const scrambled = letters.join("");
+  return scrambled === word && word.length > 1 ? [...word].reverse().join("") : scrambled;
+}
+
+function loadWordPuzzleState() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(WORD_PUZZLE_STATE_KEY) || "null");
+    return parsed && typeof parsed === "object" ? parsed : { dateKey: "", solved: false, revealed: false };
+  } catch (err) {
+    return { dateKey: "", solved: false, revealed: false };
+  }
+}
+
+let wordPuzzleState = loadWordPuzzleState();
+
+function saveWordPuzzleState() {
+  localStorage.setItem(WORD_PUZZLE_STATE_KEY, JSON.stringify(wordPuzzleState));
+}
+
+function ensureWordPuzzleStateForToday() {
+  const todayKey = localDateKey(new Date());
+  if (wordPuzzleState.dateKey === todayKey) return;
+  wordPuzzleState = { dateKey: todayKey, solved: false, revealed: false };
+  saveWordPuzzleState();
+}
+
+function renderWordPuzzle() {
+  const scrambledEl = byId("wordpuzzle-scrambled");
+  const feedbackEl = byId("wordpuzzle-feedback");
+  const guessInput = byId("wordpuzzle-guess");
+  if (!scrambledEl) return;
+
+  ensureWordPuzzleStateForToday();
+  setIcon("wordpuzzle-title-icon", "sparkle");
+
+  const word = todaysPuzzleWord();
+  const solvedOrRevealed = wordPuzzleState.solved || wordPuzzleState.revealed;
+
+  scrambledEl.textContent = solvedOrRevealed ? word : scrambleWord(word, dayOfYear(new Date()));
+  scrambledEl.classList.toggle("wordpuzzle-scrambled-solved", solvedOrRevealed);
+
+  if (guessInput) guessInput.classList.toggle("hidden", solvedOrRevealed);
+  byId("wordpuzzle-check-btn")?.classList.toggle("hidden", solvedOrRevealed);
+  byId("wordpuzzle-reveal-btn")?.classList.toggle("hidden", solvedOrRevealed);
+
+  if (feedbackEl) {
+    if (wordPuzzleState.solved) feedbackEl.textContent = "Solved!";
+    else if (wordPuzzleState.revealed) feedbackEl.textContent = "";
+    else feedbackEl.textContent = "";
+  }
+}
+
+function setupWordPuzzle() {
+  renderWordPuzzle();
+
+  const submitGuess = () => {
+    const guessInput = byId("wordpuzzle-guess");
+    const feedbackEl = byId("wordpuzzle-feedback");
+    if (!guessInput) return;
+    const guess = guessInput.value.trim().toUpperCase();
+    if (!guess) return;
+    if (guess === todaysPuzzleWord()) {
+      wordPuzzleState.solved = true;
+      saveWordPuzzleState();
+      renderWordPuzzle();
+    } else if (feedbackEl) {
+      feedbackEl.textContent = "Not quite - try again";
+      guessInput.value = "";
+    }
+  };
+
+  byId("wordpuzzle-check-btn")?.addEventListener("click", submitGuess);
+  byId("wordpuzzle-guess")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") submitGuess();
+  });
+  byId("wordpuzzle-reveal-btn")?.addEventListener("click", () => {
+    wordPuzzleState.revealed = true;
+    saveWordPuzzleState();
+    renderWordPuzzle();
+  });
+}
+
+/** Same segmented-toggle wiring as setupUtilitiesPage() - Journal and Word
+ *  Game share one page, one at a time. */
+function setupExtrasPage() {
+  setupJournal();
+  setupWordPuzzle();
+
+  const segmented = byId("extras-mode-segmented");
+  segmented?.addEventListener("click", (event) => {
+    const btn = event.target.closest(".settings-segment");
+    if (!btn) return;
+    segmented.querySelectorAll(".settings-segment").forEach((b) => b.classList.toggle("active", b === btn));
+    byId("journal-view")?.classList.toggle("hidden", btn.dataset.mode !== "journal");
+    byId("wordpuzzle-view")?.classList.toggle("hidden", btn.dataset.mode !== "wordpuzzle");
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
 
@@ -4700,6 +5242,9 @@ function init() {
   setupTimerPage();
   setupUtilitiesPage();
   setupCountdown();
+  setupNightRoutine();
+  setupHabits();
+  setupExtrasPage();
   setupReadingMode();
   setupWeekView();
   renderSleepHistory();

@@ -247,6 +247,23 @@
           </h2>
           <div class="worldclock-list" id="countdown-list"></div>
         </section>
+
+        <section class="card card-nightroutine" id="card-nightroutine" aria-label="Night Routine">
+          <h2 class="card-title">
+            <span class="icon-slot small" id="nightroutine-title-icon" aria-hidden="true"></span>
+            Night Routine
+            <span class="card-title-badge" id="nightroutine-progress"></span>
+          </h2>
+          <div class="nightroutine-list" id="nightroutine-list"></div>
+        </section>
+
+        <section class="card card-habits" id="card-habits" aria-label="Habits">
+          <h2 class="card-title">
+            <span class="icon-slot small" id="habits-title-icon" aria-hidden="true"></span>
+            Habits
+          </h2>
+          <div class="habits-list" id="habits-list"></div>
+        </section>
       </main>
     </section>
 
@@ -458,6 +475,26 @@
           <input type="date" id="countdown-add-date" class="settings-text-input" aria-label="Countdown target date" />
           <input type="text" id="countdown-add-label" class="settings-text-input" placeholder="Label…" maxlength="40" autocomplete="off" aria-label="Countdown label" />
           <button class="settings-add-btn" type="button" id="countdown-add-btn">Add</button>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h2 class="settings-title">Night Routine</h2>
+        <div class="settings-text-hint">A small checklist that resets itself every night.</div>
+        <div class="settings-app-list" id="settings-nightroutine-list"></div>
+        <div class="settings-schedule-add-row">
+          <input type="text" id="nightroutine-add-label" class="settings-text-input" placeholder="Routine item…" maxlength="40" autocomplete="off" aria-label="Night routine item" />
+          <button class="settings-add-btn" type="button" id="nightroutine-add-btn">Add</button>
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h2 class="settings-title">Habits</h2>
+        <div class="settings-text-hint">A few daily habits to check off, with a streak count for each.</div>
+        <div class="settings-app-list" id="settings-habits-list"></div>
+        <div class="settings-schedule-add-row">
+          <input type="text" id="habits-add-label" class="settings-text-input" placeholder="Habit…" maxlength="40" autocomplete="off" aria-label="Habit label" />
+          <button class="settings-add-btn" type="button" id="habits-add-btn">Add</button>
         </div>
       </div>
 
@@ -718,6 +755,43 @@
         </div>
       </div>
     </section>
+
+    <!-- Page 8: Journal and Word Game - one line to jot down each night
+         (with a callback to whatever was written on this same date last
+         year), and a tiny daily word-scramble puzzle. Same segmented-view
+         pattern as Timer/Stopwatch and Calculator/Converter. -->
+    <section class="page page-extras" id="page-extras" aria-label="Journal and Word Game">
+      <div class="settings-segmented extras-mode-segmented" id="extras-mode-segmented" role="radiogroup" aria-label="Journal or word game">
+        <button class="settings-segment active" type="button" data-mode="journal">Journal</button>
+        <button class="settings-segment" type="button" data-mode="wordpuzzle">Word Game</button>
+      </div>
+
+      <div class="journal-view" id="journal-view">
+        <h2 class="card-title">
+          <span class="icon-slot small" id="journal-title-icon" aria-hidden="true"></span>
+          Tonight
+        </h2>
+        <textarea class="journal-textarea" id="journal-textarea" placeholder="A line or two about today…" maxlength="500" aria-label="Tonight's journal entry"></textarea>
+        <div class="journal-callback hidden" id="journal-callback">
+          <div class="journal-callback-label">One year ago today</div>
+          <div class="journal-callback-text" id="journal-callback-text"></div>
+        </div>
+      </div>
+
+      <div class="wordpuzzle-view hidden" id="wordpuzzle-view">
+        <h2 class="card-title">
+          <span class="icon-slot small" id="wordpuzzle-title-icon" aria-hidden="true"></span>
+          Word Scramble
+        </h2>
+        <div class="wordpuzzle-scrambled" id="wordpuzzle-scrambled"></div>
+        <div class="wordpuzzle-feedback" id="wordpuzzle-feedback"></div>
+        <div class="wordpuzzle-row">
+          <input type="text" id="wordpuzzle-guess" class="settings-text-input" placeholder="Your guess…" maxlength="20" autocomplete="off" aria-label="Word guess" />
+          <button class="alarm-action-btn" id="wordpuzzle-check-btn" type="button">Check</button>
+        </div>
+        <button class="settings-add-btn settings-btn-secondary" id="wordpuzzle-reveal-btn" type="button">Reveal</button>
+      </div>
+    </section>
   </div>
 
   <nav class="page-dots" id="page-dots" aria-label="Dashboard pages">
@@ -728,6 +802,7 @@
     <button class="page-dot" data-page="4" aria-label="Settings"></button>
     <button class="page-dot" data-page="5" aria-label="Timer and Stopwatch"></button>
     <button class="page-dot" data-page="6" aria-label="Calculator and Converter"></button>
+    <button class="page-dot" data-page="7" aria-label="Journal and Word Game"></button>
   </nav>
 
   <!-- Week-ahead glance and Agenda editor, opened from the Agenda card's

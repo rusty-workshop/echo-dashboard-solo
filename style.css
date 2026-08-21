@@ -4332,6 +4332,216 @@ body.ambient-active .weather-bg {
   margin-bottom: 0.6em;
 }
 
+.icon-slot.tiny {
+  width: clamp(0.75rem, 1.3vw, 0.95rem);
+  height: clamp(0.75rem, 1.3vw, 0.95rem);
+  color: inherit;
+}
+
+/* A small right-aligned pill on a .card-title row, e.g. Night Routine's
+   "2/3" progress count - margin-left: auto pushes it flush right without
+   a wrapper element, since .card-title is already display: flex. */
+.card-title-badge {
+  margin-left: auto;
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Night Routine -----------------------------------------------------
+   An optional Overview tile (off by default, same as World Clock/
+   Countdown) - a short checklist that resets at midnight (see
+   ensureNightRoutineStateForToday() in script.js). Reuses .settings-app-list/
+   .settings-app-row for its Settings-page CRUD list. */
+
+.nightroutine-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
+  overflow-y: auto;
+}
+
+.nightroutine-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  font-size: var(--fs-body);
+  cursor: pointer;
+}
+
+.nightroutine-checkbox {
+  flex: none;
+  width: 1.1em;
+  height: 1.1em;
+  accent-color: var(--accent);
+}
+
+.nightroutine-label {
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color var(--transition-fast);
+}
+
+.nightroutine-label-done {
+  color: var(--text-tertiary);
+  text-decoration: line-through;
+}
+
+/* ---- Habits --------------------------------------------------------------
+   An optional Overview tile (off by default) - same checkbox-row shape as
+   Night Routine, plus a streak badge that doesn't reset (habitStreak() in
+   script.js recomputes it from the log every render). */
+
+.habits-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
+  overflow-y: auto;
+}
+
+.habit-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  font-size: var(--fs-body);
+  cursor: pointer;
+}
+
+.habit-checkbox {
+  flex: none;
+  width: 1.1em;
+  height: 1.1em;
+  accent-color: var(--accent);
+}
+
+.habit-label {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color var(--transition-fast);
+}
+
+.habit-label-done {
+  color: var(--text-tertiary);
+  text-decoration: line-through;
+}
+
+.habit-streak {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.2em;
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+
+/* ---- Journal + Word Scramble (Page 8) -----------------------------------
+   Same segmented-view shape as Timer/Stopwatch and Calculator/Converter -
+   one page, two toggleable views sharing .settings-segmented's look via
+   .extras-mode-segmented. */
+
+.page-extras {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(0.75rem, 2.5vh, 1.5rem);
+}
+
+.extras-mode-segmented {
+  width: min(20rem, 70vw);
+}
+
+.journal-view,
+.wordpuzzle-view {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.6em;
+  width: min(26rem, 85vw);
+}
+
+.journal-textarea {
+  resize: none;
+  height: clamp(6rem, 18vh, 9rem);
+  padding: 0.7em 0.9em;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+  font-family: inherit;
+  font-size: var(--fs-body);
+  color: var(--text-primary);
+}
+
+.journal-textarea:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.journal-textarea::placeholder {
+  color: var(--text-tertiary);
+}
+
+.journal-callback {
+  padding: 0.7em 0.9em;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.journal-callback-label {
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin-bottom: 0.3em;
+}
+
+.journal-callback-text {
+  font-size: var(--fs-body);
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.wordpuzzle-scrambled {
+  text-align: center;
+  font-size: clamp(1.6rem, 5.5vw, 2.4rem);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  padding: 0.5em 0.3em;
+  background: var(--surface-elevated);
+  border-radius: var(--radius-md);
+}
+
+.wordpuzzle-scrambled-solved {
+  color: var(--accent);
+}
+
+.wordpuzzle-feedback {
+  min-height: 1.2em;
+  text-align: center;
+  font-size: var(--fs-body);
+  color: var(--text-secondary);
+}
+
+.wordpuzzle-row {
+  display: flex;
+  gap: 0.5em;
+}
+
+.wordpuzzle-row .settings-text-input {
+  flex: 1;
+  min-width: 0;
+}
+
 /* ---- Themes ------------------------------------------------------------
    One shared layout/markup/script.js underneath every theme - each block
    below just swaps palette/typography/shape/shadow variables (plus a

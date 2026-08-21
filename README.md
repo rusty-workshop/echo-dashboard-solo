@@ -44,11 +44,12 @@ over unchanged.
 
 ## Features
 
-- **Six swipeable pages** (CSS scroll-snap, real touch scrolling, tap-to-jump
-  dot indicators): a Morning Overview, a Daily Info page, a Clock/Alarm/Sound
-  Machine page, a Wake Alarms page, and a Settings page. Bedside Mode,
-  Ambient Mode, and Breathing Mode are summoned full-screen overlays,
-  not pages you swipe to.
+- **Eight swipeable pages** (CSS scroll-snap, real touch scrolling,
+  tap-to-jump dot indicators): a Morning Overview, a Daily Info page, a
+  Clock/Alarm/Sound Machine page, a Wake Alarms page, a Settings page, a
+  Timer/Stopwatch page, a Calculator/Converter page, and a Journal/Word
+  Game page. Bedside Mode, Ambient Mode, and Breathing Mode are summoned
+  full-screen overlays, not pages you swipe to.
 - **Weather, live from public APIs**: [Open-Meteo](https://open-meteo.com/)
   for current conditions, a 5-day forecast, sunrise/sunset, air quality,
   and rain probability; the [National Weather Service](https://www.weather.gov/documentation/services-web-api)
@@ -108,6 +109,21 @@ over unchanged.
   Dashboard Layout) showing the days remaining until up to a handful of
   self-picked dates, managed from Settings. Purely local — no network,
   re-evaluated once per day rather than every clock tick.
+- **Night Routine**: an optional Overview tile — a short checklist that
+  resets itself every night, ships with three starter items ("Doors
+  locked", "Alarm set for tomorrow", "Phone charging") that can be edited
+  or removed entirely from Settings.
+- **Habits**: an optional Overview tile — a few self-defined daily habits
+  with a streak count next to each. Checking a habit off today never
+  breaks an otherwise-intact streak just because it hasn't been checked
+  off *yet* that day.
+- **Journal**: a page for one short line a night — and a year later, that
+  same page starts surfacing whatever was written on this exact date last
+  year right above tonight's blank box. The one part of this dashboard
+  that gets more useful the longer it's used, not just a repeating view.
+- **Word Scramble**: a tiny daily word puzzle sharing the Journal's page,
+  deterministically picked and scrambled by date (same seed all day, same
+  word for everyone), for something to solve half-asleep.
 - **Today in History**: three real historical events for today's date, via
   Wikipedia's public "on this day" feed. Daily Info page only, and simply
   hides itself on a failed fetch rather than showing anything broken —
