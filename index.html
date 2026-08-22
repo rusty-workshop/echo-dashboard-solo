@@ -188,7 +188,7 @@
           <h2 class="card-title">
             <span class="icon-slot small" id="schedule-title-icon" aria-hidden="true"></span>
             <span id="schedule-title-text">Today's Agenda</span>
-            <button class="notif-clear-btn" id="week-view-trigger-btn" type="button" aria-label="View the week">
+            <button class="icon-button week-view-trigger-btn" id="week-view-trigger-btn" type="button" aria-label="View the week">
               <span class="icon-slot small" id="week-view-trigger-icon" aria-hidden="true"></span>
             </button>
           </h2>
@@ -549,8 +549,11 @@
           <button class="settings-segment" type="button" data-mode="scheduled">Schedule</button>
         </div>
         <div class="settings-photo-grid" id="wallpaper-photo-grid"></div>
-        <label class="settings-add-btn settings-file-label" id="wallpaper-import-label" for="wallpaper-import-input">Import Photos</label>
-        <input type="file" id="wallpaper-import-input" accept="image/*" multiple class="settings-file-input" />
+        <div class="settings-wallpaper-actions-row">
+          <label class="settings-add-btn settings-file-label" id="wallpaper-import-label" for="wallpaper-import-input">Import Photos</label>
+          <input type="file" id="wallpaper-import-input" accept="image/*" multiple class="settings-file-input" />
+          <button class="settings-add-btn settings-btn-secondary hidden" type="button" id="wallpaper-shuffle-btn">Shuffle Now</button>
+        </div>
         <div class="settings-text-hint hidden" id="wallpaper-import-hint"></div>
         <div class="settings-schedule-add-row hidden" id="wallpaper-schedule-add-row">
           <input type="time" id="wallpaper-schedule-time" class="settings-text-input" aria-label="Time for scheduled photo" />

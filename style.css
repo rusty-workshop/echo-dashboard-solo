@@ -547,12 +547,6 @@ body.reading-mode-active .reading-mode-overlay {
   display: none;
 }
 
-/* Shared by the DND and Focus toggles (see setupQuickDurationPopover() in
-   script.js) - centered rather than anchored near the triggering button
-   like the sticky-note editor, since this same popover opens from two
-   different buttons in two different card positions (Overview's compact
-   card, the Phone page's -lg one) rather than one fixed spot. */
-
 /* ---- Week view popover ------------------------------------------------- */
 
 .week-view-backdrop {
@@ -836,13 +830,12 @@ body.reading-mode-active .reading-mode-overlay {
   color: var(--text-secondary);
 }
 
-/* Sits at the end of a .card-title/.panel-title row (both already
-   display: flex) - margin-left: auto pushes it flush right without
-   needing a wrapper element. */
-
-/* The DND toggle re-uses .notif-clear-btn's shape - this just adds a
-   persistent "on" indicator distinct from the momentary :active press
-   state above. */
+/* Sits at the end of a .card-title row (already display: flex) -
+   margin-left: auto pushes it flush right without needing a wrapper
+   element. Same pattern as .journal-history-btn. */
+.week-view-trigger-btn {
+  margin-left: auto;
+}
 
 .card-body {
   display: flex;
@@ -1145,11 +1138,10 @@ body.reading-mode-active .reading-mode-overlay {
   height: clamp(2.4rem, 6vw, 3.6rem);
 }
 
-/* ---- Pages 2 & 3: Phone / Daily Info ---------------------------------------
-   Both share the same shape: a big glanceable "hero" readout on the left
-   (battery % or temperature) and a full-height list panel on the right
-   (notifications or schedule) with more room than their compact Morning
-   Overview counterparts. */
+/* ---- Page 2: Daily Info ----------------------------------------------------
+   A big glanceable "hero" readout on the left (temperature) and a
+   full-height list panel on the right (schedule) with more room than
+   their compact Morning Overview counterparts. */
 
 .page-body-split {
   height: 100%;
@@ -1189,8 +1181,8 @@ body.reading-mode-active .reading-mode-overlay {
   font-variant-numeric: tabular-nums;
 }
 
-/* Daily Info's hero-tile stacks more rows than Phone's (icon, temp,
-   condition, H/L, sunrise/sunset, AQI, details) - on the Echo Show's fixed
+/* Daily Info's hero-tile stacks a lot of rows (icon, temp, condition, H/L,
+   sunrise/sunset, AQI, details) - on the Echo Show's fixed
    960x480 viewport this overflows the page, confirmed live (the
    weather-details-lg line was clipped at the screen edge).
    --fs-hero/.icon-slot.xlarge are width-driven (vw) clamps, not
@@ -2136,12 +2128,10 @@ body.reading-mode-active .reading-mode-overlay {
   color: var(--surface);
 }
 
-/* ---- Notifications settings ------------------------------------------------
-   The dashboard-side equivalent of the phone app's NotificationAppsCard -
-   every app that's ever posted a notification, with a switch for whether
-   it's allowed to show on the dashboard. Lazy-loaded only when this page
-   is actually scrolled to (see ensureNotificationAppsLoaded() in script.js)
-   since the full app list only matters here, not every 30s poll. */
+/* ---- Generic Settings CRUD list ---------------------------------------------
+   A plain "label + remove button" row, reused as-is by Custom Sounds,
+   Night Routine, Habits, Reminders, and World Clock's Settings-page lists
+   (each has its own list container id, but they all share this row shape). */
 
 .settings-app-list {
   flex: none;
@@ -2790,8 +2780,24 @@ body.ambient-active {
   transition: opacity 2.5s ease;
 }
 
+/* A slow, continuous "living photo" zoom/drift - transform rather than
+   animating background-size/-position directly, since background-size:
+   cover above already guarantees full coverage at scale(1); scaling up
+   from there can only ever show more of the image, never introduce a gap
+   at the edges the way animating a percentage background-size directly
+   could for a photo whose aspect ratio doesn't match the screen's. */
+@keyframes wallpaper-ken-burns {
+  0% {
+    transform: scale(1) translate(0, 0);
+  }
+  100% {
+    transform: scale(1.12) translate(-1.5%, 1.5%);
+  }
+}
+
 .wallpaper-photo-layer.visible {
   opacity: 1;
+  animation: wallpaper-ken-burns 45s ease-in-out infinite alternate;
 }
 
 .wallpaper-scrim {
@@ -4102,6 +4108,13 @@ body.ambient-active .weather-bg {
   display: inline-block;
 }
 
+.settings-wallpaper-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  flex-wrap: wrap;
+}
+
 .settings-file-input {
   display: none;
 }
@@ -4529,6 +4542,28 @@ body.ambient-active .weather-bg {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--accent);
+}
+
+/* One-shot celebration the render a streak first crosses a round number
+   (7/14/30/...) - see HABIT_MILESTONE_STREAKS in script.js. A plain CSS
+   animation rather than JS-driven, so it costs nothing once it finishes;
+   next render's fresh element (list.innerHTML is always fully replaced)
+   simply won't have this class unless another milestone is hit later. */
+@keyframes habit-milestone-pop {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.5);
+    color: var(--accent);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.habit-streak-milestone {
+  animation: habit-milestone-pop 650ms ease-out;
 }
 
 /* ---- Journal + Word Scramble (Page 8) -----------------------------------

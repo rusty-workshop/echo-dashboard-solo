@@ -89,7 +89,10 @@ over unchanged.
   toggle overrides any of the three without touching the imported library.
   The dashboard's accent color follows whichever photo is showing (a
   downsampled color-average, boosted to a usable UI tone) the same way it
-  otherwise follows the weather.
+  otherwise follows the weather. A slow, continuous zoom/drift keeps
+  whatever's showing from feeling like a static image, and a "Shuffle Now"
+  button (Rotating mode only) jumps to the next photo on demand instead of
+  waiting out the timer.
 - **Bedside Mode**: one tap starts rain (optional — toggle "Play sound
   automatically" off in Settings for just the dimming/quiet clock), dims
   the display to a comfortable 50% (adjustable live via an on-screen
@@ -125,7 +128,8 @@ over unchanged.
 - **Habits**: an optional Overview tile — a few self-defined daily habits
   with a streak count next to each. Checking a habit off today never
   breaks an otherwise-intact streak just because it hasn't been checked
-  off *yet* that day.
+  off *yet* that day. A streak crossing a round number (7, 30, 100...)
+  gets a one-shot celebratory flourish, not a permanently different look.
 - **Reminders**: an optional Overview tile — a short list of things on a
   repeating interval rather than a nightly reset, like "water the plant
   every 10 days." Each one just tracks when it was last marked done; its

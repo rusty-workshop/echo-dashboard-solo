@@ -45,13 +45,6 @@ const ALERT_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 8_000;
 const VOLUME_DEBOUNCE_MS = 400;
 
-// Below this and not charging, the battery warning banner shows - matches
-// Android's own default low-battery threshold. (Kept even without a phone
-// battery to warn about, in case a future card ever needs the same
-// threshold - see aqiCategory()'s sibling EPA breakpoints for the same
-// "pure function of a number" reasoning.)
-const LOW_BATTERY_THRESHOLD = 15;
-
 // ---------------------------------------------------------------------------
 // Morning Overview tile layout - purely a local display preference now
 // (used to be customizable from the Aurora phone app; there's no phone
@@ -106,15 +99,7 @@ const ICONS = {
   snow:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 14a4.5 4.5 0 0 1-.5-8.98A6 6 0 0 1 17.6 3.03 4.5 4.5 0 0 1 17 14H6.5z"/><path d="M8 18v4M8 18l-1.5 1.5M8 18l1.5 1.5M12 18v4M12 18l-1.5 1.5M12 18l1.5 1.5M16 18v4M16 18l-1.5 1.5M16 18l1.5 1.5"/></svg>',
   fog: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 8h13M3 12h18M3 16h13M8 20h8"/></svg>',
-  battery:
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 10v4"/><rect x="5" y="9.5" width="10" height="5" fill="currentColor" stroke="none"/></svg>',
-  batteryCharging:
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 10v4"/><path d="M12 9l-3 4h3l-1 4 4-5h-3z" fill="currentColor" stroke="none"/></svg>',
-  batteryAlert:
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 10v4"/><path d="M11 9v3M11 15h.01" stroke-width="2.4"/></svg>',
   bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>',
-  bellOff:
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-9.33-5M6.26 6.26A6 6 0 0 0 6 8c0 7-3 9-3 9h14"/><path d="M18 8v2.5M13.73 21a2 2 0 0 1-3.46 0"/><path d="M2 2l20 20"/></svg>',
   calendar:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/></svg>',
   alarm:
@@ -141,8 +126,6 @@ const ICONS = {
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4M12 17h.01" stroke-width="2.4"/></svg>',
   leaf: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 20A7 7 0 0 1 4 13c0-5 4.5-9 11-10 1 6.5-3 11-11 11"/><path d="M4 20c3-2 5.5-4.5 7-8"/></svg>',
   pin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a5 5 0 0 0-5 5c0 3.5 5 11 5 11s5-7.5 5-11a5 5 0 0 0-5-5z"/><circle cx="12" cy="7" r="2"/></svg>',
-  focus:
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="0.8" fill="currentColor" stroke="none"/></svg>',
   book: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>',
   globe:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>',
@@ -257,8 +240,9 @@ function setRollingNumber(id, targetValue, suffix = "") {
   numberRollHandles.set(id, requestAnimationFrame(step));
 }
 
-/** Calendar event titles and app names come from the phone - untrusted
- *  user data - so escape before dropping anything into innerHTML. */
+/** Agenda titles, journal entries, imported sound/photo names, and every
+ *  other free-text field on this dashboard are user-entered - escape
+ *  before dropping any of it into innerHTML. */
 function escapeHtml(value) {
   const div = document.createElement("div");
   div.textContent = value;
@@ -588,9 +572,10 @@ function greetingForHour(hour) {
   return "Good night";
 }
 
-/** Same timezone the clock uses (see currentTimezone below) - so "9pm" in
- *  the greeting means 9pm wherever the phone actually is, not wherever
- *  this display's own system clock happens to be set. */
+/** Same timezone the clock uses (see currentTimezone below, set from the
+ *  weather API's response for HOME_LATITUDE/HOME_LONGITUDE) - so "9pm" in
+ *  the greeting means 9pm at that fixed location, not wherever this
+ *  display's own system clock happens to be set. */
 function currentHourInTimezone(timeZone) {
   const parts = new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", hourCycle: "h23" }).formatToParts(
     new Date()
@@ -1946,6 +1931,12 @@ function renderMorningBriefing() {
     if (weather.rainExpectedAt) {
       weatherLine += ` Bring an umbrella - rain expected around ${formatTimeOfDay(weather.rainExpectedAt)}.`;
     }
+    // Checked against the raw Fahrenheit value regardless of tempUnit (the
+    // display-only conversion), so the 45° threshold means the same actual
+    // temperature no matter which unit is currently shown.
+    if (weather.low != null && weather.low < 45) {
+      weatherLine += ` Jacket weather - low of ${displayTemp(weather.low)}°.`;
+    }
   }
   setText("briefing-weather", weatherLine);
 
@@ -1958,6 +1949,14 @@ function renderMorningBriefing() {
     const minutesUntil = minutesFromHHMM(firstEvent.time) - nowMinutes;
     const countdown = formatCountdown(minutesUntil);
     eventLine = countdown ? `${firstEvent.title} ${countdown}` : `${firstEvent.title} at ${formatTimeOfDay(firstEvent.time)}`;
+  }
+  // Tacked onto the same line rather than a whole new one - the hero panel
+  // is already tight on vertical space, and this is meant as a passing
+  // heads-up, not something that needs its own dedicated row the way the
+  // Reminders tile itself does.
+  const dueReminderCount = recurringReminders.filter((r) => daysUntilReminderDue(r) <= 0).length;
+  if (dueReminderCount > 0) {
+    eventLine += ` · ${dueReminderCount} reminder${dueReminderCount === 1 ? "" : "s"} due`;
   }
   setText("briefing-summary", eventLine);
 }
@@ -3166,6 +3165,11 @@ function renderWallpaperSettings() {
   const isScheduled = wallpaperMode === "scheduled";
   byId("wallpaper-schedule-add-row")?.classList.toggle("hidden", !isScheduled);
   byId("wallpaper-schedule-list")?.classList.toggle("hidden", !isScheduled);
+  // Only meaningful in Rotating mode - shuffling would just get silently
+  // overwritten by the next clock tick's applyWallpaperMode() in Single/
+  // Scheduled, since those modes always snap back to their own fixed
+  // photo rather than whatever showNextWallpaperPhoto() just picked.
+  byId("wallpaper-shuffle-btn")?.classList.toggle("hidden", wallpaperMode !== "rotating" || wallpaperPhotoIds.length < 2);
 
   renderWallpaperPhotoGrid();
   renderWallpaperSchedule();
@@ -3200,6 +3204,11 @@ async function setupWallpaperSettings() {
     const files = event.target.files;
     if (files && files.length > 0) await importWallpaperFiles(files);
     event.target.value = ""; // lets the same filename be re-imported later
+  });
+
+  byId("wallpaper-shuffle-btn")?.addEventListener("click", () => {
+    showNextWallpaperPhoto();
+    renderWallpaperPhotoGrid(); // the grid's "active" thumbnail follows Single mode's selection, not rotation - no-op there, harmless either way
   });
 
   segmented.addEventListener("click", (event) => {
@@ -4596,6 +4605,11 @@ function habitStreak(habitId) {
   return streak;
 }
 
+// A streak crossing one of these gets a one-shot celebratory flourish
+// (see renderHabits() below) rather than a permanently different look -
+// the milestone is the moment it's reached, not an ongoing state.
+const HABIT_MILESTONE_STREAKS = new Set([7, 14, 30, 50, 100, 150, 200, 365]);
+
 function renderHabits() {
   const list = byId("habits-list");
   if (!list) return;
@@ -4610,14 +4624,30 @@ function renderHabits() {
     return;
   }
 
+  // Every render fully replaces this list's innerHTML (no diffing), so the
+  // only way to tell "just reached 30" apart from "still at 30 from an
+  // unrelated re-render" is to read back whatever streak each row last
+  // showed before overwriting it - same idea as setText()'s value-pulse,
+  // just read from the DOM instead of compared against it inline.
+  const previousStreaks = new Map();
+  list.querySelectorAll(".habit-row[data-id]").forEach((row) => {
+    const streakEl = row.querySelector(".habit-streak");
+    if (streakEl) previousStreaks.set(row.dataset.id, Number(streakEl.dataset.streak));
+  });
+
   list.innerHTML = habits
     .map((habit) => {
       const checked = isHabitCheckedToday(habit.id);
       const streak = habitStreak(habit.id);
-      return `<label class="habit-row">
+      const justHitMilestone = HABIT_MILESTONE_STREAKS.has(streak) && previousStreaks.get(habit.id) !== streak;
+      return `<label class="habit-row" data-id="${escapeHtml(habit.id)}">
         <input type="checkbox" class="habit-checkbox" data-id="${escapeHtml(habit.id)}" ${checked ? "checked" : ""} />
         <span class="${checked ? "habit-label habit-label-done" : "habit-label"}">${escapeHtml(habit.label)}</span>
-        ${streak > 0 ? `<span class="habit-streak"><span class="icon-slot tiny" aria-hidden="true">${ICONS.flame}</span>${streak}</span>` : ""}
+        ${
+          streak > 0
+            ? `<span class="habit-streak${justHitMilestone ? " habit-streak-milestone" : ""}" data-streak="${streak}"><span class="icon-slot tiny" aria-hidden="true">${ICONS.flame}</span>${streak}</span>`
+            : ""
+        }
       </label>`;
     })
     .join("");
