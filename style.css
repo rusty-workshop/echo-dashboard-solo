@@ -4498,6 +4498,60 @@ body.ambient-active .weather-bg {
   font-weight: 600;
 }
 
+/* Shopping List also reuses .nightroutine-checkbox/.nightroutine-label
+   (see card-shoppinglist in index.html), but each row needs its own
+   .shoppinglist-row-main wrapper around just the checkbox+label (rather
+   than the row itself being the <label>, like .nightroutine-row is) so a
+   per-item remove button can sit alongside as a sibling without landing
+   inside a <label> - same reasoning as .habit-row-main above. */
+.shoppinglist-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  font-size: var(--fs-body);
+}
+
+.shoppinglist-row-main {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  flex: 1;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.shoppinglist-row-main .nightroutine-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.shoppinglist-remove {
+  flex: none;
+  color: var(--text-tertiary);
+}
+
+.shoppinglist-add-row {
+  flex: none;
+  display: flex;
+  gap: 0.4em;
+  margin-top: 0.4em;
+}
+
+.shoppinglist-add-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-md);
+  padding: 0.35em 0.5em;
+  font-size: var(--fs-caption);
+}
+
+.shoppinglist-clear-btn {
+  color: var(--text-tertiary);
+}
+
 .settings-schedule-add-row .reminders-interval-input {
   width: 4.5em;
   text-align: center;
@@ -4532,7 +4586,23 @@ body.ambient-active .weather-bg {
   align-items: center;
   gap: 0.6em;
   font-size: var(--fs-body);
+}
+
+/* Wraps just the checkbox+label so tapping the text still toggles the
+   habit (native <label> behavior) without also swallowing clicks meant
+   for .habit-history-btn, which sits outside it as a sibling. */
+.habit-row-main {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  flex: 1;
+  min-width: 0;
   cursor: pointer;
+}
+
+.habit-history-btn {
+  flex: none;
+  color: var(--text-tertiary);
 }
 
 .habit-checkbox {
@@ -4588,6 +4658,85 @@ body.ambient-active .weather-bg {
 
 .habit-streak-milestone {
   animation: habit-milestone-pop 650ms ease-out;
+}
+
+/* ---- Habit History popover ------------------------------------------- */
+
+.habit-history-stats {
+  flex: none;
+  font-size: var(--fs-caption);
+  color: var(--text-secondary);
+  margin-bottom: 0.6em;
+}
+
+.habit-history-month-nav {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1em;
+  margin-bottom: 0.4em;
+}
+
+.habit-history-month-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: var(--fs-body-lg);
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.1em 0.5em;
+}
+
+.habit-history-month-label {
+  font-weight: 700;
+  font-size: var(--fs-body);
+  min-width: 9em;
+  text-align: center;
+}
+
+.habit-history-weekdays,
+.habit-history-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 0.3em;
+}
+
+.habit-history-weekdays {
+  flex: none;
+  font-size: var(--fs-caption);
+  color: var(--text-tertiary);
+  text-align: center;
+  margin-bottom: 0.2em;
+}
+
+.habit-history-grid {
+  flex: none;
+}
+
+.habit-history-cell {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  font-size: var(--fs-caption);
+  color: var(--text-tertiary);
+}
+
+.habit-history-cell-blank {
+  background: transparent;
+}
+
+.habit-history-cell-done {
+  background: var(--accent);
+  color: var(--surface);
+  font-weight: 600;
+}
+
+.habit-history-cell-today {
+  box-shadow: inset 0 0 0 2px var(--accent);
 }
 
 /* ---- Journal + Word Scramble (Page 8) -----------------------------------

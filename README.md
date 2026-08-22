@@ -39,9 +39,11 @@ guided Breathing exercise, a "Today in History" card, and a deterministic
 daily quote.
 
 Everything that never needed a phone in the first place — themes, Reading
-Mode, Bedside/Ambient Mode, sticky notes, Timer/Stopwatch, the animated
-weather backgrounds, severe weather alerts, page transitions — carries
-over unchanged.
+Mode, Bedside/Ambient Mode, sticky notes, the animated weather
+backgrounds, severe weather alerts, page transitions — carries over
+unchanged. The Timer got one small change: it now keeps chiming every few
+seconds after hitting zero, until dismissed, instead of a single
+triple-beep that's easy to miss from another room.
 
 ## Features
 
@@ -135,6 +137,14 @@ over unchanged.
   breaks an otherwise-intact streak just because it hasn't been checked
   off *yet* that day. A streak crossing a round number (7, 30, 100...)
   gets a one-shot celebratory flourish, not a permanently different look.
+  A calendar icon on each habit opens its History — a month heatmap with
+  current streak, best streak ever, and a completion count, navigable
+  month to month.
+- **Shopping List**: an optional Overview tile for a plain grocery/errand
+  list — add and check off items right on the tile itself (no trip to
+  Settings needed, unlike Habits/Countdown/Reminders), with checked items
+  sliding to the bottom rather than disappearing, and a "clear checked"
+  button to sweep them out once the trip's done.
 - **Reminders**: an optional Overview tile — a short list of things on a
   repeating interval rather than a nightly reset, like "water the plant
   every 10 days." Each one just tracks when it was last marked done; its

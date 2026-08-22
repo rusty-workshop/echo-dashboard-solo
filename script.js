@@ -61,6 +61,7 @@ const TILE_DOM_ID = {
   nightroutine: "card-nightroutine",
   habits: "card-habits",
   reminders: "card-reminders",
+  shoppinglist: "card-shoppinglist",
 };
 
 const TILE_SIZE_WEIGHT = { small: 0.7, medium: 1, large: 1.5 };
@@ -75,6 +76,7 @@ const DEFAULT_TILE_LAYOUT = [
   { id: "nightroutine", visible: false, size: "small" },
   { id: "habits", visible: false, size: "small" },
   { id: "reminders", visible: false, size: "small" },
+  { id: "shoppinglist", visible: false, size: "small" },
 ];
 
 const LAYOUT_KEY = "aurora-dashboard:layout";
@@ -129,6 +131,7 @@ const ICONS = {
   book: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>',
   globe:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>',
+  cart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1"/><circle cx="18" cy="20" r="1"/><path d="M2 3h2l2.4 12.2a2 2 0 0 0 2 1.6h8.6a2 2 0 0 0 2-1.6L21 7H6"/></svg>',
   wind: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h11a3 3 0 1 0-3-3M3 16h15a3 3 0 1 1-3 3M3 12h9a2.5 2.5 0 1 0-2.5-2.5"/></svg>',
   sparkle:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5L18 18M18 6l-2.5 2.5M8.5 15.5L6 18"/><circle cx="12" cy="12" r="2.2" fill="currentColor" stroke="none"/></svg>',
@@ -2053,6 +2056,7 @@ const TILE_LABELS = {
   nightroutine: "Night Routine",
   habits: "Habits",
   reminders: "Reminders",
+  shoppinglist: "Shopping List",
 };
 
 let lastLayoutTiles = null;
@@ -2110,17 +2114,18 @@ function saveLayoutUpdate(tiles) {
 
   // World Clock self-heals within a second either way (updateClock() calls
   // renderWorldClocks() every tick), but Countdown/Night Routine/Habits/
-  // Reminders only re-render on a CRUD action or the once-a-day boundary
-  // check - so switching one of them on here wouldn't actually show
-  // anything until one of those happened to fire. Cheap and idempotent, so
-  // just always refresh all five the moment a layout change lands, rather
-  // than leaving a newly-visible tile blank until something else happens
-  // to trigger it.
+  // Reminders/Shopping List only re-render on a CRUD action or the
+  // once-a-day boundary check - so switching one of them on here wouldn't
+  // actually show anything until one of those happened to fire. Cheap and
+  // idempotent, so just always refresh all six the moment a layout change
+  // lands, rather than leaving a newly-visible tile blank until something
+  // else happens to trigger it.
   renderWorldClocks();
   renderCountdowns();
   renderNightRoutine();
   renderHabits();
   renderRecurringReminders();
+  renderShoppingList();
 }
 
 function setupLayoutSettings() {
@@ -3964,13 +3969,14 @@ let timerDurationSeconds = 300;
 let timerRemainingSeconds = 300;
 let timerEndAt = null;
 let timerHandle = null;
+let timerRingingHandle = null; // repeats the chime after hitting zero, until dismissed
 
 function renderTimerDisplay() {
   const display = byId("timer-display");
   if (!display) return;
   display.textContent = formatClockDisplay(timerRemainingSeconds);
   display.classList.toggle("timer-running", Boolean(timerHandle));
-  display.classList.toggle("timer-done", timerRemainingSeconds === 0 && !timerHandle && timerEndAt === null);
+  display.classList.toggle("timer-done", Boolean(timerRingingHandle));
 }
 
 function stopTimerInterval() {
@@ -3978,13 +3984,31 @@ function stopTimerInterval() {
   timerHandle = null;
 }
 
+/** Stops the repeating post-zero chime (see startTimerRinging()) without
+ *  touching timerRemainingSeconds - callers decide separately whether to
+ *  also reset the duration (resetTimer()) or leave it at zero (dismissing
+ *  via the Start/Dismiss button, ready for the next "Start" to re-arm). */
+function stopTimerRinging() {
+  clearInterval(timerRingingHandle);
+  timerRingingHandle = null;
+}
+
+/** A single triple-beep (playTimerBeep()) is easy to miss if you're not in
+ *  the room - this keeps it going every few seconds, same "ring until you
+ *  do something about it" idea as a Wake Alarm, until Dismiss or Reset. */
+function startTimerRinging() {
+  playTimerBeep();
+  timerRingingHandle = setInterval(playTimerBeep, 4000);
+  setText("timer-start-btn", "Dismiss");
+  renderTimerDisplay();
+}
+
 function tickTimer() {
   timerRemainingSeconds = Math.max(0, Math.round((timerEndAt - Date.now()) / 1000));
   if (timerRemainingSeconds === 0) {
     stopTimerInterval();
     timerEndAt = null;
-    setText("timer-start-btn", "Start");
-    playTimerBeep();
+    startTimerRinging();
   }
   renderTimerDisplay();
 }
@@ -4007,6 +4031,7 @@ function pauseTimer() {
 
 function resetTimer() {
   stopTimerInterval();
+  stopTimerRinging();
   timerEndAt = null;
   timerRemainingSeconds = timerDurationSeconds;
   setText("timer-start-btn", "Start");
@@ -4026,7 +4051,17 @@ function setupTimer() {
       .forEach((b) => b.classList.toggle("active", b === btn));
   });
 
-  byId("timer-start-btn")?.addEventListener("click", () => (timerHandle ? pauseTimer() : startTimer()));
+  byId("timer-start-btn")?.addEventListener("click", () => {
+    if (timerRingingHandle) {
+      stopTimerRinging();
+      setText("timer-start-btn", "Start");
+      renderTimerDisplay();
+    } else if (timerHandle) {
+      pauseTimer();
+    } else {
+      startTimer();
+    }
+  });
   byId("timer-reset-btn")?.addEventListener("click", resetTimer);
 }
 
@@ -4706,6 +4741,26 @@ function habitStreak(habitId) {
   return streak;
 }
 
+/** Longest run anywhere in the log, not just the trailing-from-today run
+ *  habitStreak() computes - for "best streak ever" in Habit History. Walks
+ *  the sorted date strings once rather than testing every possible start
+ *  date against the Set, since consecutive calendar dates are also
+ *  consecutive ISO date strings once sorted. */
+function habitBestStreak(habitId) {
+  const dates = [...(habitLog[habitId] || [])].sort();
+  if (dates.length === 0) return 0;
+  let best = 1;
+  let current = 1;
+  for (let i = 1; i < dates.length; i++) {
+    const prev = new Date(dates[i - 1]);
+    const cur = new Date(dates[i]);
+    const dayGap = Math.round((cur - prev) / 86400000);
+    current = dayGap === 1 ? current + 1 : 1;
+    best = Math.max(best, current);
+  }
+  return best;
+}
+
 // A streak crossing one of these gets a one-shot celebratory flourish
 // (see renderHabits() below) rather than a permanently different look -
 // the milestone is the moment it's reached, not an ongoing state.
@@ -4741,15 +4796,20 @@ function renderHabits() {
       const checked = isHabitCheckedToday(habit.id);
       const streak = habitStreak(habit.id);
       const justHitMilestone = HABIT_MILESTONE_STREAKS.has(streak) && previousStreaks.get(habit.id) !== streak;
-      return `<label class="habit-row" data-id="${escapeHtml(habit.id)}">
-        <input type="checkbox" class="habit-checkbox" data-id="${escapeHtml(habit.id)}" ${checked ? "checked" : ""} />
-        <span class="${checked ? "habit-label habit-label-done" : "habit-label"}">${escapeHtml(habit.label)}</span>
+      return `<div class="habit-row" data-id="${escapeHtml(habit.id)}">
+        <label class="habit-row-main">
+          <input type="checkbox" class="habit-checkbox" data-id="${escapeHtml(habit.id)}" ${checked ? "checked" : ""} />
+          <span class="${checked ? "habit-label habit-label-done" : "habit-label"}">${escapeHtml(habit.label)}</span>
+        </label>
         ${
           streak > 0
             ? `<span class="habit-streak${justHitMilestone ? " habit-streak-milestone" : ""}" data-streak="${streak}"><span class="icon-slot tiny" aria-hidden="true">${ICONS.flame}</span>${streak}</span>`
             : ""
         }
-      </label>`;
+        <button class="icon-button-small habit-history-btn" type="button" data-id="${escapeHtml(habit.id)}" aria-label="View history for ${escapeHtml(habit.label)}">
+          <span class="icon-slot tiny" aria-hidden="true">${ICONS.calendar}</span>
+        </button>
+      </div>`;
     })
     .join("");
 }
@@ -4805,6 +4865,92 @@ function setupHabits() {
     renderHabits();
     renderHabitsSettings();
   });
+
+  byId("habits-list")?.addEventListener("click", (event) => {
+    const historyBtn = event.target.closest(".habit-history-btn");
+    if (historyBtn) openHabitHistory(historyBtn.dataset.id);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Habit History - a read-only month calendar heatmap for one habit, reached
+// by tapping its calendar icon on the Overview tile. Same
+// backdrop/popover shape as Week View/Journal History; unlike Journal
+// History there's no per-day drill-down (a habit day is just done/not-done,
+// nothing to read), so it's a single view with month navigation instead of
+// a list/detail pair.
+// ---------------------------------------------------------------------------
+
+let habitHistoryId = null;
+let habitHistoryYear = null;
+let habitHistoryMonth = null; // 0-indexed, same convention as Date
+
+function renderHabitHistory() {
+  const habit = habits.find((h) => h.id === habitHistoryId);
+  if (!habit) return;
+
+  setText("habit-history-title", habit.label);
+
+  const dates = new Set(habitLog[habitHistoryId] || []);
+  const monthStart = new Date(habitHistoryYear, habitHistoryMonth, 1);
+  const daysInMonth = new Date(habitHistoryYear, habitHistoryMonth + 1, 0).getDate();
+  const doneThisMonth = Array.from({ length: daysInMonth }, (_, i) => i + 1).filter((day) =>
+    dates.has(localDateKey(new Date(habitHistoryYear, habitHistoryMonth, day)))
+  ).length;
+
+  setText(
+    "habit-history-stats",
+    `Current streak: ${habitStreak(habitHistoryId)} · Best: ${habitBestStreak(habitHistoryId)} · ${doneThisMonth}/${daysInMonth} this month`
+  );
+  setText("habit-history-month-label", monthStart.toLocaleDateString(undefined, { month: "long", year: "numeric" }));
+
+  const weekdaysEl = byId("habit-history-weekdays");
+  if (weekdaysEl && !weekdaysEl.childElementCount) {
+    weekdaysEl.innerHTML = ["S", "M", "T", "W", "T", "F", "S"].map((d) => `<span>${d}</span>`).join("");
+  }
+
+  const todayKey = localDateKey(new Date());
+  const leadingBlanks = monthStart.getDay();
+  const cells = [];
+  for (let i = 0; i < leadingBlanks; i++) cells.push('<span class="habit-history-cell habit-history-cell-blank"></span>');
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateKey = localDateKey(new Date(habitHistoryYear, habitHistoryMonth, day));
+    const classes = ["habit-history-cell"];
+    if (dates.has(dateKey)) classes.push("habit-history-cell-done");
+    if (dateKey === todayKey) classes.push("habit-history-cell-today");
+    cells.push(`<span class="${classes.join(" ")}">${day}</span>`);
+  }
+  const grid = byId("habit-history-grid");
+  if (grid) grid.innerHTML = cells.join("");
+}
+
+function openHabitHistory(habitId) {
+  habitHistoryId = habitId;
+  const today = new Date();
+  habitHistoryYear = today.getFullYear();
+  habitHistoryMonth = today.getMonth();
+  renderHabitHistory();
+  byId("habit-history-popover")?.classList.remove("hidden");
+  byId("habit-history-backdrop")?.classList.remove("hidden");
+}
+
+function closeHabitHistory() {
+  byId("habit-history-popover")?.classList.add("hidden");
+  byId("habit-history-backdrop")?.classList.add("hidden");
+}
+
+function shiftHabitHistoryMonth(delta) {
+  const next = new Date(habitHistoryYear, habitHistoryMonth + delta, 1);
+  habitHistoryYear = next.getFullYear();
+  habitHistoryMonth = next.getMonth();
+  renderHabitHistory();
+}
+
+function setupHabitHistory() {
+  byId("habit-history-close")?.addEventListener("click", closeHabitHistory);
+  byId("habit-history-backdrop")?.addEventListener("click", closeHabitHistory);
+  byId("habit-history-prev-btn")?.addEventListener("click", () => shiftHabitHistoryMonth(-1));
+  byId("habit-history-next-btn")?.addEventListener("click", () => shiftHabitHistoryMonth(1));
 }
 
 // ---------------------------------------------------------------------------
@@ -4945,6 +5091,112 @@ function setupRecurringReminders() {
     saveRecurringReminders();
     renderRecurringReminders();
     renderRecurringRemindersSettings();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Shopping List - an optional Overview tile (off by default, same as World
+// Clock/Countdown/Habits) for a plain grocery/errand list. Unlike Night
+// Routine's checklist, items never reset - checking one off just marks it
+// bought, and it stays that way (sorted to the bottom, out of the way)
+// until "Clear checked" sweeps them out. Managed entirely on the tile
+// itself rather than from Settings like Habits/Countdown/Reminders are -
+// a shopping list gets edited constantly during the week, so burying
+// add/remove in Settings would make it annoying to actually use.
+// ---------------------------------------------------------------------------
+
+const SHOPPING_LIST_KEY = "aurora-dashboard:shopping-list";
+
+function loadShoppingList() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SHOPPING_LIST_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+    return [];
+  }
+}
+
+let shoppingListItems = loadShoppingList();
+
+function saveShoppingList() {
+  localStorage.setItem(SHOPPING_LIST_KEY, JSON.stringify(shoppingListItems));
+}
+
+function renderShoppingList() {
+  const list = byId("shoppinglist-list");
+  if (!list) return;
+  setIcon("shoppinglist-title-icon", "cart");
+  setIcon("shoppinglist-clear-icon", "trash");
+
+  if (shoppingListItems.length === 0) {
+    list.innerHTML = '<div class="worldclock-empty">Add something below</div>';
+    setText("shoppinglist-progress", "");
+    return;
+  }
+
+  // Unchecked items first (in the order they were added), checked ones
+  // pushed to the bottom - out of the way, but still visible/undoable
+  // until "Clear checked" actually removes them.
+  const sorted = [...shoppingListItems].sort((a, b) => Number(a.checked) - Number(b.checked));
+  list.innerHTML = sorted
+    .map(
+      (item) => `<div class="shoppinglist-row" data-id="${escapeHtml(item.id)}">
+        <label class="shoppinglist-row-main">
+          <input type="checkbox" class="shoppinglist-checkbox nightroutine-checkbox" data-id="${escapeHtml(item.id)}" ${item.checked ? "checked" : ""} />
+          <span class="${item.checked ? "nightroutine-label nightroutine-label-done" : "nightroutine-label"}">${escapeHtml(item.label)}</span>
+        </label>
+        <button class="icon-button-small shoppinglist-remove" type="button" data-id="${escapeHtml(item.id)}" aria-label="Remove ${escapeHtml(item.label)}">
+          <span class="icon-slot tiny" aria-hidden="true">${ICONS.close}</span>
+        </button>
+      </div>`
+    )
+    .join("");
+
+  const uncheckedCount = shoppingListItems.filter((item) => !item.checked).length;
+  setText("shoppinglist-progress", uncheckedCount > 0 ? `${uncheckedCount} left` : "");
+}
+
+function addShoppingListItem() {
+  const input = byId("shoppinglist-add-input");
+  const label = input?.value.trim();
+  if (!label) return;
+  shoppingListItems.push({ id: `shop-${Date.now()}`, label, checked: false });
+  saveShoppingList();
+  renderShoppingList();
+  if (input) input.value = "";
+}
+
+function setupShoppingList() {
+  renderShoppingList();
+  setIcon("shoppinglist-add-icon", "plus");
+
+  byId("shoppinglist-add-btn")?.addEventListener("click", addShoppingListItem);
+  byId("shoppinglist-add-input")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") addShoppingListItem();
+  });
+
+  byId("shoppinglist-list")?.addEventListener("change", (event) => {
+    const checkbox = event.target.closest(".shoppinglist-checkbox");
+    if (!checkbox) return;
+    const item = shoppingListItems.find((i) => i.id === checkbox.dataset.id);
+    if (!item) return;
+    item.checked = checkbox.checked;
+    saveShoppingList();
+    renderShoppingList();
+  });
+
+  byId("shoppinglist-list")?.addEventListener("click", (event) => {
+    const removeBtn = event.target.closest(".shoppinglist-remove");
+    if (!removeBtn) return;
+    shoppingListItems = shoppingListItems.filter((i) => i.id !== removeBtn.dataset.id);
+    saveShoppingList();
+    renderShoppingList();
+  });
+
+  byId("shoppinglist-clear-btn")?.addEventListener("click", () => {
+    shoppingListItems = shoppingListItems.filter((i) => !i.checked);
+    saveShoppingList();
+    renderShoppingList();
   });
 }
 
@@ -6454,14 +6706,6 @@ function setupBackupSettings() {
 // ---------------------------------------------------------------------------
 
 function init() {
-  // Lays out the card grid immediately, before weather or anything else
-  // has loaded - without this, the cards would render as one plain
-  // full-width column (their static markup has no .card-row wrappers any
-  // more; those are only built by applyTileLayout) for a brief moment on
-  // first paint.
-  applyTileLayout(loadLayout());
-  renderLayoutSettings(loadLayout());
-
   setupPager();
   setupPageScrollEffect();
   setupThemePicker();
@@ -6477,7 +6721,9 @@ function init() {
   setupCountdown();
   setupNightRoutine();
   setupHabits();
+  setupHabitHistory();
   setupRecurringReminders();
+  setupShoppingList();
   setupExtrasPage();
   setupJournalHistory();
   setupPrivacyMode();
@@ -6509,6 +6755,23 @@ function init() {
   renderWeekView();
   renderWakeAlarms();
   renderNextWakeAlarmInline();
+
+  // Applied last (but still synchronously, before anything async like
+  // startWeatherRefreshLoop() yields control - so there's no risk of a
+  // flash of the cards' unstyled, .card-row-less static markup on first
+  // paint) rather than first, so that every setup*() call above it runs
+  // while every card - including any tile currently invisible in the
+  // saved layout - is still attached to the document. applyTileLayout()
+  // detaches invisible tiles' card elements from the DOM entirely (see its
+  // own comment on cachedCardElements); a setup*() function that does
+  // byId("some-list")?.addEventListener(...) for an invisible tile's list
+  // would otherwise silently find nothing and never attach its listener -
+  // and since a detached node's listeners persist across being
+  // reattached later (turning the tile on in Settings doesn't create a
+  // new node), a listener that failed to attach here would stay missing
+  // for the rest of the session, not just until the tile is switched on.
+  applyTileLayout(loadLayout());
+  renderLayoutSettings(loadLayout());
 
   startClock();
   startWeatherRefreshLoop();

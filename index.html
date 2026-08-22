@@ -286,6 +286,24 @@
           </h2>
           <div class="nightroutine-list" id="reminders-list"></div>
         </section>
+
+        <section class="card card-shoppinglist" id="card-shoppinglist" aria-label="Shopping List">
+          <h2 class="card-title">
+            <span class="icon-slot small" id="shoppinglist-title-icon" aria-hidden="true"></span>
+            Shopping List
+            <span class="card-title-badge" id="shoppinglist-progress"></span>
+            <button class="icon-button-small shoppinglist-clear-btn" id="shoppinglist-clear-btn" type="button" aria-label="Clear checked items">
+              <span class="icon-slot tiny" id="shoppinglist-clear-icon" aria-hidden="true"></span>
+            </button>
+          </h2>
+          <div class="nightroutine-list" id="shoppinglist-list"></div>
+          <div class="shoppinglist-add-row">
+            <input type="text" id="shoppinglist-add-input" class="shoppinglist-add-input" placeholder="Add item…" maxlength="60" autocomplete="off" aria-label="Add shopping list item" />
+            <button class="icon-button-small" id="shoppinglist-add-btn" type="button" aria-label="Add item">
+              <span class="icon-slot" id="shoppinglist-add-icon" aria-hidden="true"></span>
+            </button>
+          </div>
+        </section>
       </main>
     </section>
 
@@ -944,6 +962,26 @@
       <div class="journal-history-detail-date" id="journal-history-detail-date"></div>
       <div class="journal-history-detail-text" id="journal-history-detail-text"></div>
     </div>
+  </div>
+
+  <!-- Habit History - a month calendar heatmap for one habit, reached by
+       tapping its calendar icon on the Overview tile (see setupHabits() in
+       script.js). Read-only - the checkbox on the Overview tile itself is
+       still the only way to actually mark a day done/undone. -->
+  <div class="week-view-backdrop hidden" id="habit-history-backdrop"></div>
+  <div class="week-view-popover hidden" id="habit-history-popover">
+    <div class="sticky-note-editor-header">
+      <span class="sticky-note-editor-title" id="habit-history-title">Habit History</span>
+      <button class="sticky-note-editor-close" id="habit-history-close" type="button" aria-label="Close">&times;</button>
+    </div>
+    <div class="habit-history-stats" id="habit-history-stats"></div>
+    <div class="habit-history-month-nav">
+      <button class="habit-history-month-btn" id="habit-history-prev-btn" type="button" aria-label="Previous month">&lsaquo;</button>
+      <span class="habit-history-month-label" id="habit-history-month-label"></span>
+      <button class="habit-history-month-btn" id="habit-history-next-btn" type="button" aria-label="Next month">&rsaquo;</button>
+    </div>
+    <div class="habit-history-weekdays" id="habit-history-weekdays"></div>
+    <div class="habit-history-grid" id="habit-history-grid"></div>
   </div>
 
   <!-- Outside the pager so it covers whichever page is active when an
