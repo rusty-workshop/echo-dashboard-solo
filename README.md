@@ -69,7 +69,10 @@ over unchanged.
   sound and Dismiss/Snooze, automatically stopping the ambient sound
   machine so the two never overlap. Survives a page reload mid-schedule;
   only requires the page itself to stay loaded and powered, which is the
-  normal condition for an always-on kiosk display.
+  normal condition for an always-on kiosk display. A play/stop preview
+  button next to both sound pickers (the per-alarm one and the shared
+  default) lets you hear the sound before committing to it, capped at a
+  few seconds even for a long ambient loop or custom song.
 - **Sound Machine**: White Noise, Pink Noise, Brown Noise, Rain, Ocean
   Waves, and a Chime, every one synthesized on the spot with the Web Audio
   API and looped gaplessly — no audio files bundled or fetched. Survives a
@@ -120,7 +123,9 @@ over unchanged.
 - **Countdown**: an optional Overview tile (off by default — turn it on in
   Dashboard Layout) showing the days remaining until up to a handful of
   self-picked dates, managed from Settings. Purely local — no network,
-  re-evaluated once per day rather than every clock tick.
+  re-evaluated once per day rather than every clock tick. A "Repeats
+  yearly" toggle on new entries is for birthdays/anniversaries: once the
+  date passes, it rolls forward to next year instead of disappearing.
 - **Night Routine**: an optional Overview tile — a short checklist that
   resets itself every night, ships with three starter items ("Doors
   locked", "Alarm set for tomorrow", "Phone charging") that can be edited

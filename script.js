@@ -3576,6 +3576,9 @@ function syncDefaultAlarmSoundPicker() {
 function setupWakeAlarmForm() {
   setIcon("wakealarms-title-icon", "alarm");
   setIcon("wakealarm-add-icon", "plus");
+  setIcon("wakealarm-default-sound-preview-icon", "play");
+  setIcon("wakealarm-sound-preview-icon", "play");
+  setupAlarmSoundPreviewButtons();
   buildWakeAlarmDayToggle();
   setupWakeAlarmList();
   syncDefaultAlarmSoundPicker();
@@ -3616,6 +3619,88 @@ function setupWakeAlarmForm() {
     byId("wakealarm-days")
       ?.querySelectorAll(".wakealarm-day-btn.active")
       .forEach((btn) => btn.classList.remove("active"));
+  });
+}
+
+// ---- Sound preview ----------------------------------------------------
+// A small play/stop button next to each alarm sound picker, so you can
+// hear what you're about to set as an alarm without waiting for one to
+// actually ring. Its own AudioContext/gain, independent of both the
+// ambient Sound Machine and the alarm-ringing engine below, so previewing
+// a sound can never interfere with (or get interfered with by) whatever
+// either of those is doing at the time.
+
+const ALARM_PREVIEW_DURATION_MS = 4000;
+let alarmPreviewAudioContext = null;
+let alarmPreviewSource = null;
+let alarmPreviewTimeoutHandle = null;
+let alarmPreviewActive = null; // {btnId, iconId} for whichever button is currently playing, or null
+
+function stopAlarmSoundPreview() {
+  if (alarmPreviewSource) {
+    try {
+      alarmPreviewSource.onended = null; // about to stop it ourselves - the natural "ended" handler would just re-run this
+      alarmPreviewSource.stop();
+    } catch (err) {
+      // Already stopped/ended - fine, that's the state we wanted anyway.
+    }
+    alarmPreviewSource = null;
+  }
+  if (alarmPreviewTimeoutHandle) {
+    clearTimeout(alarmPreviewTimeoutHandle);
+    alarmPreviewTimeoutHandle = null;
+  }
+  if (alarmPreviewActive) {
+    byId(alarmPreviewActive.btnId)?.setAttribute("aria-pressed", "false");
+    setIcon(alarmPreviewActive.iconId, "play");
+    alarmPreviewActive = null;
+  }
+}
+
+/** [btnId]/[iconId] identify which of the two preview buttons was pressed,
+ *  purely so the icon/aria-pressed can be reset correctly - clicking
+ *  either button while the other is previewing stops the first one first
+ *  (only one preview plays at a time), same as toggling either off. */
+async function toggleAlarmSoundPreview(soundId, btnId, iconId) {
+  const wasThisOnePlaying = alarmPreviewActive?.btnId === btnId;
+  stopAlarmSoundPreview();
+  if (wasThisOnePlaying) return;
+
+  if (!alarmPreviewAudioContext) {
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    alarmPreviewAudioContext = new AudioContextCtor();
+  }
+  if (alarmPreviewAudioContext.state === "suspended") {
+    alarmPreviewAudioContext.resume().catch(() => {});
+  }
+
+  const buffer = await loadSoundBuffer(soundId);
+  const source = alarmPreviewAudioContext.createBufferSource();
+  source.buffer = buffer;
+  source.connect(alarmPreviewAudioContext.destination);
+  source.onended = stopAlarmSoundPreview; // a short buffer (e.g. Chime) finishing on its own, before the timeout below
+  source.start(0);
+  alarmPreviewSource = source;
+  alarmPreviewActive = { btnId, iconId };
+
+  byId(btnId)?.setAttribute("aria-pressed", "true");
+  setIcon(iconId, "pause");
+  // Caps how long a long ambient loop or a multi-minute custom song plays
+  // for - this is a preview, not actually starting the alarm early.
+  alarmPreviewTimeoutHandle = setTimeout(stopAlarmSoundPreview, ALARM_PREVIEW_DURATION_MS);
+}
+
+function setupAlarmSoundPreviewButtons() {
+  byId("wakealarm-default-sound-preview-btn")?.addEventListener("click", () => {
+    const soundId = byId("wakealarm-default-sound-picker")?.value;
+    if (soundId) toggleAlarmSoundPreview(soundId, "wakealarm-default-sound-preview-btn", "wakealarm-default-sound-preview-icon");
+  });
+  byId("wakealarm-sound-preview-btn")?.addEventListener("click", () => {
+    // Empty value means "Default" (see populateSoundPickers()) - preview
+    // what the alarm would actually ring with, same fallback as
+    // resolveAlarmSoundId(), rather than silently doing nothing.
+    const soundId = byId("wakealarm-sound-picker")?.value || defaultAlarmSoundId || SOUND_LIBRARY[0].id;
+    if (soundId) toggleAlarmSoundPreview(soundId, "wakealarm-sound-preview-btn", "wakealarm-sound-preview-icon");
   });
 }
 
@@ -4301,12 +4386,21 @@ function saveCountdowns() {
   localStorage.setItem(COUNTDOWN_KEY, JSON.stringify(countdownEntries));
 }
 
-function daysUntil(dateKey) {
+/** [repeatsYearly] rolls a date that's already passed this year forward to
+ *  its next occurrence (birthdays/anniversaries) instead of going negative -
+ *  renderCountdowns() filters out negative-days entries, so without this a
+ *  repeating date would just vanish forever the day after it passes. */
+function daysUntil(dateKey, repeatsYearly) {
   const [year, month, day] = dateKey.split("-").map(Number);
-  const target = new Date(year, month - 1, day);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+  let target = new Date(year, month - 1, day);
   target.setHours(0, 0, 0, 0);
+  if (repeatsYearly && target < today) {
+    target = new Date(today.getFullYear(), month - 1, day);
+    target.setHours(0, 0, 0, 0);
+    if (target < today) target = new Date(today.getFullYear() + 1, month - 1, day);
+  }
   return Math.round((target - today) / 86400000);
 }
 
@@ -4315,7 +4409,7 @@ function renderCountdowns() {
   if (!list) return;
 
   const upcoming = countdownEntries
-    .map((entry) => ({ ...entry, days: daysUntil(entry.date) }))
+    .map((entry) => ({ ...entry, days: daysUntil(entry.date, entry.repeatsYearly) }))
     .filter((entry) => entry.days >= 0)
     .sort((a, b) => a.days - b.days)
     .slice(0, 3);
@@ -4344,14 +4438,15 @@ function renderCountdownSettings() {
     return;
   }
   list.innerHTML = countdownEntries
-    .map(
-      (entry, index) => `<div class="settings-app-row" data-index="${index}">
-        <span class="settings-app-label">${escapeHtml(entry.label)} - ${escapeHtml(entry.date)}</span>
+    .map((entry, index) => {
+      const yearlyBadge = entry.repeatsYearly ? `<span class="countdown-yearly-badge">Yearly</span>` : "";
+      return `<div class="settings-app-row" data-index="${index}">
+        <span class="settings-app-label">${escapeHtml(entry.label)} - ${escapeHtml(entry.date)}${yearlyBadge}</span>
         <button class="icon-button countdown-remove" type="button" aria-label="Remove ${escapeHtml(entry.label)}">
           <span class="icon-slot small" aria-hidden="true">${ICONS.close}</span>
         </button>
-      </div>`
-    )
+      </div>`;
+    })
     .join("");
 }
 
@@ -4360,17 +4455,23 @@ function setupCountdown() {
   renderCountdowns();
   renderCountdownSettings();
 
+  const yearlySwitch = byId("countdown-add-yearly");
+  yearlySwitch?.addEventListener("click", () => {
+    yearlySwitch.setAttribute("aria-checked", String(yearlySwitch.getAttribute("aria-checked") !== "true"));
+  });
+
   byId("countdown-add-btn")?.addEventListener("click", () => {
     const dateInput = byId("countdown-add-date");
     const labelInput = byId("countdown-add-label");
     const date = dateInput?.value;
     const label = labelInput?.value.trim();
     if (!date || !label) return;
-    countdownEntries.push({ date, label });
+    countdownEntries.push({ date, label, repeatsYearly: yearlySwitch?.getAttribute("aria-checked") === "true" });
     saveCountdowns();
     renderCountdowns();
     renderCountdownSettings();
     if (labelInput) labelInput.value = "";
+    yearlySwitch?.setAttribute("aria-checked", "false");
   });
 
   byId("settings-countdown-list")?.addEventListener("click", (event) => {

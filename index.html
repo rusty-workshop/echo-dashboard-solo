@@ -426,6 +426,9 @@
       <div class="wakealarm-default-sound-row">
         <span class="wakealarm-default-sound-label">Default alarm sound</span>
         <select class="sound-select" id="wakealarm-default-sound-picker" aria-label="Default alarm sound"></select>
+        <button class="icon-button-small sound-preview-btn" id="wakealarm-default-sound-preview-btn" type="button" aria-pressed="false" aria-label="Preview default alarm sound">
+          <span class="icon-slot" id="wakealarm-default-sound-preview-icon" aria-hidden="true"></span>
+        </button>
       </div>
 
       <ul class="wakealarm-list" id="wakealarm-list">
@@ -439,6 +442,9 @@
         <div class="wakealarm-form-row">
           <input type="time" id="wakealarm-time-input" class="wakealarm-time-input" aria-label="Alarm time" />
           <select class="sound-select" id="wakealarm-sound-picker" aria-label="Alarm sound"></select>
+          <button class="icon-button-small sound-preview-btn" id="wakealarm-sound-preview-btn" type="button" aria-pressed="false" aria-label="Preview alarm sound">
+            <span class="icon-slot" id="wakealarm-sound-preview-icon" aria-hidden="true"></span>
+          </button>
         </div>
         <div class="wakealarm-form-row">
           <div class="wakealarm-days" id="wakealarm-days" role="group" aria-label="Repeat on"></div>
@@ -498,6 +504,11 @@
           <input type="text" id="countdown-add-label" class="settings-text-input" placeholder="Label…" maxlength="40" autocomplete="off" aria-label="Countdown label" />
           <button class="settings-add-btn" type="button" id="countdown-add-btn">Add</button>
         </div>
+        <div class="settings-text-row">
+          <span class="settings-text-label">Repeats yearly</span>
+          <button class="settings-switch" id="countdown-add-yearly" role="switch" aria-checked="false" aria-label="New countdown repeats yearly"></button>
+        </div>
+        <div class="settings-text-hint">For a birthday or anniversary - once the date passes, it rolls forward to next year instead of disappearing.</div>
       </div>
 
       <div class="settings-section">

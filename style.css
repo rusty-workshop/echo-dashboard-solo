@@ -1133,6 +1133,18 @@ body.reading-mode-active .reading-mode-overlay {
   color: inherit;
 }
 
+/* Play/pause toggle next to an alarm sound picker - .icon-button-small's
+   plain-icon look (no pill) so it doesn't outweigh the <select> it sits
+   next to, plus an accent fill while actually previewing so it's obvious
+   which of the two pickers (if either) is currently playing. */
+.sound-preview-btn {
+  flex: none;
+}
+
+.sound-preview-btn[aria-pressed="true"] {
+  color: var(--accent);
+}
+
 .icon-slot.xlarge {
   width: clamp(2.4rem, 6vw, 3.6rem);
   height: clamp(2.4rem, 6vw, 3.6rem);
@@ -4489,6 +4501,18 @@ body.ambient-active .weather-bg {
 .settings-schedule-add-row .reminders-interval-input {
   width: 4.5em;
   text-align: center;
+}
+
+/* Small inline marker on a Countdown settings row for an entry that rolls
+   forward to next year once its date passes, rather than disappearing. */
+.countdown-yearly-badge {
+  margin-left: 0.5em;
+  padding: 0.1em 0.5em;
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+  color: var(--text-secondary);
+  font-size: var(--fs-caption);
+  white-space: nowrap;
 }
 
 /* ---- Habits --------------------------------------------------------------
