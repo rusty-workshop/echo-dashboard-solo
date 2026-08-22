@@ -67,6 +67,7 @@ const TILE_DOM_ID = {
   countdown: "card-countdown",
   nightroutine: "card-nightroutine",
   habits: "card-habits",
+  reminders: "card-reminders",
 };
 
 const TILE_SIZE_WEIGHT = { small: 0.7, medium: 1, large: 1.5 };
@@ -80,6 +81,7 @@ const DEFAULT_TILE_LAYOUT = [
   { id: "countdown", visible: false, size: "small" },
   { id: "nightroutine", visible: false, size: "small" },
   { id: "habits", visible: false, size: "small" },
+  { id: "reminders", visible: false, size: "small" },
 ];
 
 const LAYOUT_KEY = "aurora-dashboard:layout";
@@ -156,6 +158,7 @@ const ICONS = {
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6l1.5 1.5L7 5"/><path d="M3 12l1.5 1.5L7 11"/><path d="M3 18l1.5 1.5L7 17"/><path d="M11 6h10M11 12h10M11 18h10"/></svg>',
   flame:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15.36 5.21A8.25 8.25 0 0 1 12 21a8.25 8.25 0 0 1-5.96-13.95A8.29 8.29 0 0 0 9 9.6a9 9 0 0 1 3.36-6.87 8.2 8.2 0 0 0 3 2.48z"/><path d="M12 18a3.75 3.75 0 0 0 .5-7.47 6 6 0 0 0-1.93 3.55 6 6 0 0 1-2.13-1A3.75 3.75 0 0 0 12 18z"/></svg>',
+  lock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>',
 };
 
 // ---------------------------------------------------------------------------
@@ -936,6 +939,10 @@ function saveStickyNotes() {
 function renderStickyNote() {
   const banner = byId("sticky-note-banner");
   if (!banner) return;
+  if (privacyModeActive) {
+    banner.classList.add("hidden");
+    return;
+  }
   const show = stickyNotes.length > 0 && !stickyNotesDismissed;
   banner.classList.toggle("hidden", !show);
   if (!show) return;
@@ -1066,6 +1073,38 @@ function setupStickyNote() {
     stickyNotesDismissed = true;
     localStorage.setItem(STICKY_NOTES_DISMISSED_KEY, "true");
     renderStickyNote();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Privacy Mode - a quick toggle for when someone else is in the room. Hides
+// the sticky-note banner and blanks the Habits/Night Routine tiles with a
+// generic placeholder instead of their real content, rather than trying to
+// log anyone out or lock anything - it's a glance-deterrent for a display
+// sitting out in the open, not a real access control. Journal has its own,
+// separate password gate for that (see the Journal section) since password
+// protection makes sense as an always-on property of that one page, not
+// something that comes and goes with whether a guest happens to be around
+// right now.
+// ---------------------------------------------------------------------------
+
+const PRIVACY_MODE_KEY = "aurora-dashboard:privacy-mode";
+let privacyModeActive = localStorage.getItem(PRIVACY_MODE_KEY) === "true";
+
+function renderPrivacyMode() {
+  byId("privacy-mode-trigger-btn")?.setAttribute("aria-pressed", String(privacyModeActive));
+  setIcon("privacy-mode-trigger-icon", privacyModeActive ? "eyeOff" : "eye");
+  renderStickyNote();
+  renderHabits();
+  renderNightRoutine();
+}
+
+function setupPrivacyMode() {
+  renderPrivacyMode();
+  byId("privacy-mode-trigger-btn")?.addEventListener("click", () => {
+    privacyModeActive = !privacyModeActive;
+    localStorage.setItem(PRIVACY_MODE_KEY, String(privacyModeActive));
+    renderPrivacyMode();
   });
 }
 
@@ -1279,6 +1318,9 @@ function updateClock() {
     renderNightRoutine();
     renderHabits();
     renderWordPuzzle();
+    // Same reasoning as Countdown - "days until due" only changes at
+    // midnight, so this is the one place it needs recomputing.
+    renderRecurringReminders();
   }
 }
 
@@ -2011,6 +2053,7 @@ const TILE_LABELS = {
   countdown: "Countdown",
   nightroutine: "Night Routine",
   habits: "Habits",
+  reminders: "Reminders",
 };
 
 let lastLayoutTiles = null;
@@ -2067,16 +2110,18 @@ function saveLayoutUpdate(tiles) {
   applyTileLayout(tiles);
 
   // World Clock self-heals within a second either way (updateClock() calls
-  // renderWorldClocks() every tick), but Countdown/Night Routine/Habits
-  // only re-render on a CRUD action or the once-a-day boundary check - so
-  // switching one of them on here wouldn't actually show anything until
-  // one of those happened to fire. Cheap and idempotent, so just always
-  // refresh all four the moment a layout change lands, rather than leaving
-  // a newly-visible tile blank until something else happens to trigger it.
+  // renderWorldClocks() every tick), but Countdown/Night Routine/Habits/
+  // Reminders only re-render on a CRUD action or the once-a-day boundary
+  // check - so switching one of them on here wouldn't actually show
+  // anything until one of those happened to fire. Cheap and idempotent, so
+  // just always refresh all five the moment a layout change lands, rather
+  // than leaving a newly-visible tile blank until something else happens
+  // to trigger it.
   renderWorldClocks();
   renderCountdowns();
   renderNightRoutine();
   renderHabits();
+  renderRecurringReminders();
 }
 
 function setupLayoutSettings() {
@@ -4397,8 +4442,13 @@ function ensureNightRoutineStateForToday() {
 function renderNightRoutine() {
   const list = byId("nightroutine-list");
   if (!list) return;
-  ensureNightRoutineStateForToday();
   setIcon("nightroutine-title-icon", "checklist");
+  if (privacyModeActive) {
+    list.innerHTML = '<div class="worldclock-empty">Hidden - Privacy Mode is on</div>';
+    setText("nightroutine-progress", "");
+    return;
+  }
+  ensureNightRoutineStateForToday();
 
   if (nightRoutineItems.length === 0) {
     list.innerHTML = '<div class="worldclock-empty">Add a routine item in Settings</div>';
@@ -4550,6 +4600,10 @@ function renderHabits() {
   const list = byId("habits-list");
   if (!list) return;
   setIcon("habits-title-icon", "flame");
+  if (privacyModeActive) {
+    list.innerHTML = '<div class="worldclock-empty">Hidden - Privacy Mode is on</div>';
+    return;
+  }
 
   if (habits.length === 0) {
     list.innerHTML = '<div class="worldclock-empty">Add a habit in Settings</div>';
@@ -4619,6 +4673,147 @@ function setupHabits() {
     saveHabits();
     renderHabits();
     renderHabitsSettings();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Recurring Reminders - an optional Overview tile (off by default) for
+// interval-based reminders ("every N days") - the thing neither Night
+// Routine (resets every single night) nor Countdown (a fixed one-off date)
+// covers: "water the plant every 10 days", "change the AC filter every 30".
+// Each reminder just tracks when it was last marked done; its next due date
+// is computed from that plus its interval, not stored separately, so
+// "marking done" is the only write a normal use of this feature ever needs.
+// ---------------------------------------------------------------------------
+
+const RECURRING_REMINDERS_KEY = "aurora-dashboard:recurring-reminders";
+
+function loadRecurringReminders() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(RECURRING_REMINDERS_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+    return [];
+  }
+}
+
+let recurringReminders = loadRecurringReminders();
+
+function saveRecurringReminders() {
+  localStorage.setItem(RECURRING_REMINDERS_KEY, JSON.stringify(recurringReminders));
+}
+
+/** Positive = days until due, 0 = due today, negative = overdue by that
+ *  many days. lastDoneDate of null means "never done" - treated as
+ *  already due, same as a freshly-added reminder should read. */
+function daysUntilReminderDue(reminder) {
+  if (!reminder.lastDoneDate) return 0;
+  // Y/M/D components, not new Date(dateKeyString) - that string form parses
+  // as UTC midnight while `today` below is constructed in local time, and
+  // the two silently disagree by a day near local midnight (same pitfall
+  // daysUntil() for Countdown already avoids the same way).
+  const [year, month, day] = reminder.lastDoneDate.split("-").map(Number);
+  const last = new Date(year, month - 1, day);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const daysSince = Math.round((today - last) / 86400000);
+  return reminder.intervalDays - daysSince;
+}
+
+function markReminderDone(id) {
+  const reminder = recurringReminders.find((r) => r.id === id);
+  if (!reminder) return;
+  reminder.lastDoneDate = localDateKey(new Date());
+  saveRecurringReminders();
+  renderRecurringReminders();
+}
+
+function renderRecurringReminders() {
+  const list = byId("reminders-list");
+  if (!list) return;
+  setIcon("reminders-title-icon", "bell");
+
+  if (recurringReminders.length === 0) {
+    list.innerHTML = '<div class="worldclock-empty">Add a reminder in Settings</div>';
+    return;
+  }
+
+  const withDueInfo = recurringReminders
+    .map((r) => ({ ...r, daysUntilDue: daysUntilReminderDue(r) }))
+    .sort((a, b) => a.daysUntilDue - b.daysUntilDue);
+
+  list.innerHTML = withDueInfo
+    .map((r) => {
+      const dueText =
+        r.daysUntilDue === 0
+          ? "Due today"
+          : r.daysUntilDue < 0
+          ? `Overdue ${-r.daysUntilDue}d`
+          : `Due in ${r.daysUntilDue}d`;
+      return `<label class="nightroutine-row">
+          <input type="checkbox" class="reminder-done-checkbox" data-id="${escapeHtml(r.id)}" />
+          <span class="${r.daysUntilDue <= 0 ? "worldclock-time reminder-due" : "worldclock-time"}">${escapeHtml(dueText)}</span>
+          <span class="nightroutine-label">${escapeHtml(r.label)}</span>
+        </label>`;
+    })
+    .join("");
+}
+
+function renderRecurringRemindersSettings() {
+  const list = byId("settings-reminders-list");
+  if (!list) return;
+  if (recurringReminders.length === 0) {
+    list.innerHTML = '<div class="settings-app-empty">No reminders yet</div>';
+    return;
+  }
+  list.innerHTML = recurringReminders
+    .map(
+      (r, index) => `<div class="settings-app-row" data-index="${index}">
+        <span class="settings-app-label">${escapeHtml(r.label)} - every ${r.intervalDays}d</span>
+        <button class="icon-button reminder-remove" type="button" aria-label="Remove ${escapeHtml(r.label)}">
+          <span class="icon-slot small" aria-hidden="true">${ICONS.close}</span>
+        </button>
+      </div>`
+    )
+    .join("");
+}
+
+function setupRecurringReminders() {
+  renderRecurringReminders();
+  renderRecurringRemindersSettings();
+
+  // A checkbox here means "done", not "currently done" - checking it marks
+  // it done and immediately re-renders (removing/reordering the row along
+  // with everything else), so it never actually stays checked on screen.
+  byId("reminders-list")?.addEventListener("change", (event) => {
+    const checkbox = event.target.closest(".reminder-done-checkbox");
+    if (!checkbox || !checkbox.checked) return;
+    markReminderDone(checkbox.dataset.id);
+  });
+
+  byId("reminders-add-btn")?.addEventListener("click", () => {
+    const labelInput = byId("reminders-add-label");
+    const intervalInput = byId("reminders-add-interval");
+    const label = labelInput?.value.trim();
+    const intervalDays = Number(intervalInput?.value);
+    if (!label || !Number.isFinite(intervalDays) || intervalDays < 1) return;
+    recurringReminders.push({ id: `reminder-${Date.now()}`, label, intervalDays, lastDoneDate: null });
+    saveRecurringReminders();
+    renderRecurringReminders();
+    renderRecurringRemindersSettings();
+    if (labelInput) labelInput.value = "";
+    if (intervalInput) intervalInput.value = "";
+  });
+
+  byId("settings-reminders-list")?.addEventListener("click", (event) => {
+    const removeBtn = event.target.closest(".reminder-remove");
+    if (!removeBtn) return;
+    const index = Number(removeBtn.closest("[data-index]")?.dataset.index);
+    if (Number.isNaN(index)) return;
+    recurringReminders.splice(index, 1);
+    saveRecurringReminders();
+    renderRecurringReminders();
+    renderRecurringRemindersSettings();
   });
 }
 
@@ -5588,11 +5783,32 @@ function journalEntryOneYearAgo() {
   return journalEntries[localDateKey(d)] || null;
 }
 
+function formatJournalDate(dateKey) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const date = new Date(year, month - 1, day);
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+function isJournalLocked() {
+  return !!journalPasswordHash && !journalUnlocked;
+}
+
 function renderJournal() {
   const textarea = byId("journal-textarea");
   const callback = byId("journal-callback");
   const callbackText = byId("journal-callback-text");
+  const gate = byId("journal-locked-gate");
+  const historyBtn = byId("journal-history-btn");
   if (!textarea) return;
+
+  const locked = isJournalLocked();
+  gate?.classList.toggle("hidden", !locked);
+  textarea.classList.toggle("hidden", locked);
+  historyBtn?.classList.toggle("hidden", locked);
+  if (locked) {
+    callback?.classList.add("hidden");
+    return;
+  }
 
   const todayKey = localDateKey(new Date());
   if (document.activeElement !== textarea) {
@@ -5612,7 +5828,11 @@ function renderJournal() {
 
 function setupJournal() {
   setIcon("journal-title-icon", "book");
+  setIcon("journal-history-icon", "scroll");
+  setIcon("journal-locked-icon", "lock");
   renderJournal();
+  setupJournalUnlockGate();
+  setupJournalPasswordSettings();
 
   byId("journal-textarea")?.addEventListener("input", (event) => {
     const todayKey = localDateKey(new Date());
@@ -5623,6 +5843,171 @@ function setupJournal() {
       else delete journalEntries[todayKey];
       saveJournalEntries();
     }, JOURNAL_SAVE_DEBOUNCE_MS);
+  });
+
+  byId("journal-history-btn")?.addEventListener("click", openJournalHistory);
+}
+
+// ---------------------------------------------------------------------------
+// Journal password - an always-on lock on this one page, separate from
+// Privacy Mode (which is a come-and-go "someone's in the room right now"
+// toggle covering other tiles). Only a SHA-256 hash is ever stored, never
+// the plaintext password, but with no salt and nothing server-side to rate-
+// limit guesses this is a casual glance-deterrent, not real security -
+// anyone with direct access to this device's files could still read the
+// raw localStorage/IndexedDB data underneath it. journalUnlocked is
+// intentionally in-memory only (never persisted) so every fresh page load
+// starts locked again, matching "no one else can read it without the
+// password" rather than "read it once and it stays open forever."
+// Changing or removing an existing password requires re-entering it
+// correctly first - otherwise anyone could bypass the lock entirely just by
+// visiting this unlocked Settings page, without ever knowing the password.
+// ---------------------------------------------------------------------------
+
+const JOURNAL_PASSWORD_HASH_KEY = "aurora-dashboard:journal-password-hash";
+let journalPasswordHash = localStorage.getItem(JOURNAL_PASSWORD_HASH_KEY) || null;
+let journalUnlocked = false;
+
+async function hashPassword(password) {
+  const bytes = new TextEncoder().encode(password);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function renderJournalPasswordSettings() {
+  const hasPassword = !!journalPasswordHash;
+  byId("journal-password-set-row")?.classList.toggle("hidden", hasPassword);
+  byId("journal-password-change-row")?.classList.toggle("hidden", !hasPassword);
+}
+
+function showJournalPasswordFeedback(text) {
+  const feedback = byId("journal-password-feedback");
+  if (!feedback) return;
+  feedback.textContent = text;
+  feedback.classList.toggle("hidden", !text);
+}
+
+function setupJournalPasswordSettings() {
+  renderJournalPasswordSettings();
+
+  byId("journal-password-set-btn")?.addEventListener("click", async () => {
+    const input = byId("journal-password-new");
+    const password = input?.value;
+    if (!password) return;
+    journalPasswordHash = await hashPassword(password);
+    localStorage.setItem(JOURNAL_PASSWORD_HASH_KEY, journalPasswordHash);
+    journalUnlocked = false; // setting a fresh password re-locks the page, even mid-session
+    if (input) input.value = "";
+    renderJournalPasswordSettings();
+    renderJournal();
+    showJournalPasswordFeedback("Password set.");
+  });
+
+  byId("journal-password-remove-btn")?.addEventListener("click", async () => {
+    const input = byId("journal-password-current");
+    const password = input?.value;
+    if (!password) return;
+    if ((await hashPassword(password)) !== journalPasswordHash) {
+      showJournalPasswordFeedback("Wrong password.");
+      return;
+    }
+    journalPasswordHash = null;
+    localStorage.removeItem(JOURNAL_PASSWORD_HASH_KEY);
+    journalUnlocked = true; // already proved they know it - no reason to also lock them out now
+    if (input) input.value = "";
+    renderJournalPasswordSettings();
+    renderJournal();
+    showJournalPasswordFeedback("Password removed.");
+  });
+}
+
+function setupJournalUnlockGate() {
+  const submit = async () => {
+    const input = byId("journal-unlock-input");
+    const feedback = byId("journal-unlock-feedback");
+    const password = input?.value;
+    if (!password) return;
+    if ((await hashPassword(password)) === journalPasswordHash) {
+      journalUnlocked = true;
+      if (input) input.value = "";
+      feedback?.classList.add("hidden");
+      renderJournal();
+    } else if (feedback) {
+      feedback.textContent = "Wrong password.";
+      feedback.classList.remove("hidden");
+    }
+  };
+  byId("journal-unlock-btn")?.addEventListener("click", submit);
+  byId("journal-unlock-input")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") submit();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Journal History - a popover (same backdrop/popover shape as the Week
+// View) listing every past entry newest-first. Only reachable while the
+// Journal is unlocked (the button itself is hidden by renderJournal()
+// while locked - see isJournalLocked()), and past entries are read-only:
+// this is a diary you look back on, not one you go back and edit.
+// ---------------------------------------------------------------------------
+
+function renderJournalHistoryList() {
+  const list = byId("journal-history-list");
+  if (!list) return;
+  const todayKey = localDateKey(new Date());
+  const entries = Object.entries(journalEntries)
+    .filter(([dateKey]) => dateKey !== todayKey)
+    .sort((a, b) => b[0].localeCompare(a[0]));
+
+  if (entries.length === 0) {
+    list.innerHTML = '<div class="settings-app-empty">No past entries yet</div>';
+    return;
+  }
+
+  list.innerHTML = entries
+    .map(([dateKey, text]) => {
+      const preview = text.length > 50 ? `${text.slice(0, 50)}…` : text;
+      return `<button class="journal-history-row" type="button" data-date="${escapeHtml(dateKey)}">
+          <span class="journal-history-row-date">${escapeHtml(formatJournalDate(dateKey))}</span>
+          <span class="journal-history-row-preview">${escapeHtml(preview)}</span>
+        </button>`;
+    })
+    .join("");
+}
+
+function openJournalHistoryDetail(dateKey) {
+  byId("journal-history-list")?.classList.add("hidden");
+  byId("journal-history-detail")?.classList.remove("hidden");
+  setText("journal-history-detail-date", formatJournalDate(dateKey));
+  setText("journal-history-detail-text", journalEntries[dateKey] || "");
+}
+
+function closeJournalHistoryDetail() {
+  byId("journal-history-detail")?.classList.add("hidden");
+  byId("journal-history-list")?.classList.remove("hidden");
+}
+
+function openJournalHistory() {
+  renderJournalHistoryList();
+  closeJournalHistoryDetail();
+  byId("journal-history-popover")?.classList.remove("hidden");
+  byId("journal-history-backdrop")?.classList.remove("hidden");
+}
+
+function closeJournalHistory() {
+  byId("journal-history-popover")?.classList.add("hidden");
+  byId("journal-history-backdrop")?.classList.add("hidden");
+}
+
+function setupJournalHistory() {
+  byId("journal-history-close")?.addEventListener("click", closeJournalHistory);
+  byId("journal-history-backdrop")?.addEventListener("click", closeJournalHistory);
+  byId("journal-history-back-btn")?.addEventListener("click", closeJournalHistoryDetail);
+  byId("journal-history-list")?.addEventListener("click", (event) => {
+    const row = event.target.closest(".journal-history-row");
+    if (row) openJournalHistoryDetail(row.dataset.date);
   });
 }
 
@@ -5961,7 +6346,10 @@ function init() {
   setupCountdown();
   setupNightRoutine();
   setupHabits();
+  setupRecurringReminders();
   setupExtrasPage();
+  setupJournalHistory();
+  setupPrivacyMode();
   setupReadingMode();
   setupWeekView();
   renderSleepHistory();

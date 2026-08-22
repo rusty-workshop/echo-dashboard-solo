@@ -126,6 +126,9 @@
           <button class="icon-button reading-mode-trigger-btn" id="reading-mode-trigger-btn" type="button" aria-label="Toggle Reading Mode" aria-pressed="false">
             <span class="icon-slot" id="reading-mode-trigger-icon" aria-hidden="true"></span>
           </button>
+          <button class="icon-button privacy-mode-trigger-btn" id="privacy-mode-trigger-btn" type="button" aria-label="Toggle Privacy Mode" aria-pressed="false">
+            <span class="icon-slot" id="privacy-mode-trigger-icon" aria-hidden="true"></span>
+          </button>
           <button class="icon-button breathing-trigger-btn" id="breathing-trigger-btn" type="button" aria-label="Breathing exercise">
             <span class="icon-slot" id="breathing-trigger-icon" aria-hidden="true"></span>
           </button>
@@ -274,6 +277,14 @@
             Habits
           </h2>
           <div class="habits-list" id="habits-list"></div>
+        </section>
+
+        <section class="card card-reminders" id="card-reminders" aria-label="Reminders">
+          <h2 class="card-title">
+            <span class="icon-slot small" id="reminders-title-icon" aria-hidden="true"></span>
+            Reminders
+          </h2>
+          <div class="nightroutine-list" id="reminders-list"></div>
         </section>
       </main>
     </section>
@@ -510,6 +521,17 @@
       </div>
 
       <div class="settings-section">
+        <h2 class="settings-title">Reminders</h2>
+        <div class="settings-text-hint">Things on a repeating interval, not a daily reset - "water the plant every 10 days".</div>
+        <div class="settings-app-list" id="settings-reminders-list"></div>
+        <div class="settings-schedule-add-row">
+          <input type="text" id="reminders-add-label" class="settings-text-input" placeholder="Reminder…" maxlength="40" autocomplete="off" aria-label="Reminder label" />
+          <input type="number" id="reminders-add-interval" class="settings-text-input reminders-interval-input" placeholder="Days" min="1" inputmode="numeric" aria-label="Repeat every N days" />
+          <button class="settings-add-btn" type="button" id="reminders-add-btn">Add</button>
+        </div>
+      </div>
+
+      <div class="settings-section">
         <h2 class="settings-title">Custom Sounds</h2>
         <div class="settings-text-hint">Import your own audio files - they show up as options for both the Sound Machine and Wake Alarms, alongside the built-in ones.</div>
         <div class="settings-customsounds-list" id="settings-customsounds-list"></div>
@@ -648,6 +670,20 @@
         <div class="settings-text-hint">How long Bedside Mode ran each night - not sensor-based sleep tracking, just when Bedside Mode was on.</div>
         <div class="sleep-history-chart" id="sleep-history-chart"></div>
         <div class="settings-text-hint" id="sleep-history-avg">No Bedside Mode sessions yet this week</div>
+      </div>
+
+      <div class="settings-section">
+        <h2 class="settings-title">Journal Password</h2>
+        <div class="settings-text-hint">Locks the Journal page until unlocked each time the dashboard loads - a casual deterrent, not real security, since anyone with access to this device's files could still read the raw data underneath it.</div>
+        <div id="journal-password-set-row">
+          <input type="password" id="journal-password-new" class="settings-text-input" placeholder="New password" autocomplete="off" aria-label="New journal password" />
+          <button class="settings-add-btn" type="button" id="journal-password-set-btn">Set Password</button>
+        </div>
+        <div class="hidden" id="journal-password-change-row">
+          <input type="password" id="journal-password-current" class="settings-text-input" placeholder="Current password" autocomplete="off" aria-label="Current journal password" />
+          <button class="settings-add-btn settings-btn-secondary" type="button" id="journal-password-remove-btn">Remove Password</button>
+        </div>
+        <div class="settings-text-hint hidden" id="journal-password-feedback"></div>
       </div>
 
       <div class="settings-section">
@@ -814,7 +850,18 @@
         <h2 class="card-title">
           <span class="icon-slot small" id="journal-title-icon" aria-hidden="true"></span>
           Tonight
+          <button class="icon-button journal-history-btn" id="journal-history-btn" type="button" aria-label="Journal history">
+            <span class="icon-slot small" id="journal-history-icon" aria-hidden="true"></span>
+          </button>
         </h2>
+        <div class="journal-locked-gate hidden" id="journal-locked-gate">
+          <span class="icon-slot" id="journal-locked-icon" aria-hidden="true"></span>
+          <div class="journal-locked-row">
+            <input type="password" id="journal-unlock-input" class="settings-text-input" placeholder="Password" autocomplete="off" aria-label="Journal password" />
+            <button class="alarm-action-btn" type="button" id="journal-unlock-btn">Unlock</button>
+          </div>
+          <div class="settings-text-hint hidden" id="journal-unlock-feedback"></div>
+        </div>
         <textarea class="journal-textarea" id="journal-textarea" placeholder="A line or two about today…" maxlength="500" aria-label="Tonight's journal entry"></textarea>
         <div class="journal-callback hidden" id="journal-callback">
           <div class="journal-callback-label">One year ago today</div>
@@ -867,6 +914,22 @@
       <button class="settings-add-btn" type="button" id="agenda-add-btn">Add</button>
     </div>
     <div class="week-view-days" id="week-view-days"></div>
+  </div>
+
+  <!-- Journal History - past entries only, read-only (see setupJournalHistory()
+       in script.js). Only reachable while the Journal is unlocked. -->
+  <div class="week-view-backdrop hidden" id="journal-history-backdrop"></div>
+  <div class="week-view-popover hidden" id="journal-history-popover">
+    <div class="sticky-note-editor-header">
+      <span class="sticky-note-editor-title">Journal History</span>
+      <button class="sticky-note-editor-close" id="journal-history-close" type="button" aria-label="Close">&times;</button>
+    </div>
+    <div class="journal-history-list" id="journal-history-list"></div>
+    <div class="journal-history-detail hidden" id="journal-history-detail">
+      <button class="settings-add-btn settings-btn-secondary" type="button" id="journal-history-back-btn">Back</button>
+      <div class="journal-history-detail-date" id="journal-history-detail-date"></div>
+      <div class="journal-history-detail-text" id="journal-history-detail-text"></div>
+    </div>
   </div>
 
   <!-- Outside the pager so it covers whichever page is active when an

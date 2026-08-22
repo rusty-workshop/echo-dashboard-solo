@@ -126,10 +126,20 @@ over unchanged.
   with a streak count next to each. Checking a habit off today never
   breaks an otherwise-intact streak just because it hasn't been checked
   off *yet* that day.
+- **Reminders**: an optional Overview tile — a short list of things on a
+  repeating interval rather than a nightly reset, like "water the plant
+  every 10 days." Each one just tracks when it was last marked done; its
+  next due date is computed from that, not stored separately.
 - **Journal**: a page for one short line a night — and a year later, that
   same page starts surfacing whatever was written on this exact date last
   year right above tonight's blank box. The one part of this dashboard
   that gets more useful the longer it's used, not just a repeating view.
+  A History button opens every past entry, newest first, read-only. An
+  optional password (Settings → Journal Password) locks the whole page —
+  entry, callback, and history alike — until unlocked each time the
+  dashboard loads; only a SHA-256 hash is ever stored, and this is a
+  casual glance-deterrent, not real security, since anyone with direct
+  access to this device's files could still read the raw data underneath.
 - **Word Scramble**: a tiny daily word puzzle sharing the Journal's page,
   deterministically picked and scrambled by date (same seed all day, same
   word for everyone), for something to solve half-asleep.
@@ -157,6 +167,11 @@ over unchanged.
   Overridable on demand or on a daily schedule from Settings.
 - **Reading Mode**: dims and warms whichever page is showing without
   taking it over the way Bedside/Ambient Mode do — cards stay fully visible.
+- **Privacy Mode**: one tap (top of the Morning Overview) hides the
+  sticky-note banner and blanks the Habits/Night Routine tiles with a
+  generic placeholder — a quick "someone's in the room" toggle, separate
+  from the Journal's own always-on password since the two solve different
+  problems (a passing glance vs. deliberately reading it).
 - **Sticky notes**: short dashboard-only reminders, one at a time
   (cycling if there's more than one), managed from a popover.
 - **Sleep History**: a 7-day chart of how long Bedside Mode ran each

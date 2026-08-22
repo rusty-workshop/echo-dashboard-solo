@@ -267,6 +267,11 @@ body.reading-mode-active .reading-mode-overlay {
   color: var(--surface);
 }
 
+.privacy-mode-trigger-btn[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--surface);
+}
+
 .clock-panel {
   display: flex;
   flex-direction: column;
@@ -4460,6 +4465,19 @@ body.ambient-active .weather-bg {
   text-decoration: line-through;
 }
 
+/* Reminders reuses .nightroutine-row/.nightroutine-label wholesale (see
+   card-reminders in index.html) - only the due/overdue accent color is
+   new here. */
+.reminder-due {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.settings-schedule-add-row .reminders-interval-input {
+  width: 4.5em;
+  text-align: center;
+}
+
 /* ---- Habits --------------------------------------------------------------
    An optional Overview tile (off by default) - same checkbox-row shape as
    Night Routine, plus a streak badge that doesn't reset (habitStreak() in
@@ -4539,6 +4557,37 @@ body.ambient-active .weather-bg {
   width: min(26rem, 85vw);
 }
 
+.journal-history-btn {
+  margin-left: auto;
+}
+
+.journal-locked-gate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6em;
+  padding: 1.5em 1em;
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+}
+
+.journal-locked-gate .icon-slot {
+  width: 1.8rem;
+  height: 1.8rem;
+  color: var(--text-tertiary);
+}
+
+.journal-locked-row {
+  display: flex;
+  gap: 0.5em;
+  width: 100%;
+}
+
+.journal-locked-row .settings-text-input {
+  flex: 1;
+  min-width: 0;
+}
+
 .journal-textarea {
   resize: none;
   height: clamp(6rem, 18vh, 9rem);
@@ -4579,6 +4628,69 @@ body.ambient-active .weather-bg {
   font-size: var(--fs-body);
   color: var(--text-secondary);
   font-style: italic;
+}
+
+/* ---- Journal History popover --------------------------------------------
+   Reuses .week-view-popover/.week-view-backdrop wholesale (see
+   #journal-history-popover in index.html) - only the list/detail content
+   inside it is new. Two states in one popover (list, then a selected
+   entry's full text) rather than a second popover, toggled by
+   openJournalHistoryDetail()/closeJournalHistoryDetail() in script.js. */
+
+.journal-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
+}
+
+.journal-history-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15em;
+  width: 100%;
+  background: var(--surface);
+  border: none;
+  border-radius: var(--radius-md);
+  padding: 0.6em 0.9em;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+}
+
+.journal-history-row-date {
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  color: var(--text-tertiary);
+}
+
+.journal-history-row-preview {
+  font-size: var(--fs-body);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.journal-history-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6em;
+}
+
+.journal-history-detail-date {
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.journal-history-detail-text {
+  font-size: var(--fs-body);
+  color: var(--text-primary);
+  white-space: pre-wrap;
 }
 
 .wordpuzzle-scrambled {
