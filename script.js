@@ -5772,6 +5772,168 @@ function setupExtrasPage() {
 }
 
 // ---------------------------------------------------------------------------
+// Backup - everything this dashboard knows, in one downloadable file. There's
+// no server holding any of this: every setting, the whole Agenda, every
+// Journal entry, every imported sound and wallpaper photo lives only in this
+// browser's localStorage/IndexedDB. A cleared profile, a factory reset, or
+// just moving to a new kiosk device would otherwise lose all of it with no
+// way back - this is the way back.
+//
+// localStorage keys are collected dynamically (any "aurora-dashboard:" key,
+// plus the theme choice) rather than off a hardcoded list, so a future
+// feature that adds its own key is backed up automatically without anyone
+// having to remember to update this section. WEATHER_CACHE_KEY is the one
+// deliberate exclusion - it's a re-fetched cache, not a setting, and
+// restoring a stale one would just show outdated weather until the next
+// poll overwrites it anyway.
+// ---------------------------------------------------------------------------
+
+const BACKUP_VERSION = 1;
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result); // "data:<mime>;base64,...."
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+function base64ToBlob(dataUrl, mimeType) {
+  const base64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mimeType });
+}
+
+function collectBackupLocalStorage() {
+  const entries = {};
+  for (const key of Object.keys(localStorage)) {
+    if (key === WEATHER_CACHE_KEY) continue;
+    if (key.startsWith("aurora-dashboard:") || key === "echo-dashboard-theme") {
+      entries[key] = localStorage.getItem(key);
+    }
+  }
+  return entries;
+}
+
+async function exportBackup() {
+  const [soundRecords, photoRecords] = await Promise.all([
+    loadAllCustomSoundRecords().catch(() => []),
+    loadAllWallpaperRecords().catch(() => []),
+  ]);
+
+  const customSoundsData = await Promise.all(
+    soundRecords.map(async (r) => ({
+      id: r.id,
+      displayName: r.displayName,
+      mimeType: r.blob.type,
+      dataUrl: await blobToBase64(r.blob),
+    }))
+  );
+  const wallpaperPhotosData = await Promise.all(
+    photoRecords.map(async (r) => ({
+      id: r.id,
+      mimeType: r.blob.type,
+      dataUrl: await blobToBase64(r.blob),
+    }))
+  );
+
+  const backup = {
+    version: BACKUP_VERSION,
+    exportedAt: new Date().toISOString(),
+    localStorage: collectBackupLocalStorage(),
+    customSounds: customSoundsData,
+    wallpaperPhotos: wallpaperPhotosData,
+  };
+
+  const blob = new Blob([JSON.stringify(backup)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `echo-dashboard-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+/** Restore = replace, not merge - clears every existing "aurora-dashboard:"
+ *  key and every existing custom sound/wallpaper photo before writing the
+ *  backup's contents, so a restore never leaves stale entries mixed in
+ *  alongside the recovered ones. Reloads the page once done rather than
+ *  trying to hot-reload the dozens of module-level variables each section
+ *  of this file initializes once from storage at load time - a fresh load
+ *  is the only way to guarantee every one of them picks up the restored
+ *  values. */
+async function importBackup(file) {
+  const text = await file.text();
+  const backup = JSON.parse(text);
+  if (!backup || typeof backup !== "object" || !backup.localStorage) {
+    throw new Error("That doesn't look like a dashboard backup file.");
+  }
+
+  for (const key of Object.keys(localStorage)) {
+    if (key.startsWith("aurora-dashboard:") || key === "echo-dashboard-theme") {
+      localStorage.removeItem(key);
+    }
+  }
+  for (const [key, value] of Object.entries(backup.localStorage)) {
+    localStorage.setItem(key, value);
+  }
+
+  const [existingSounds, existingPhotos] = await Promise.all([
+    loadAllCustomSoundRecords().catch(() => []),
+    loadAllWallpaperRecords().catch(() => []),
+  ]);
+  await Promise.all(existingSounds.map((r) => deleteCustomSoundRecord(r.id)));
+  await Promise.all(existingPhotos.map((r) => deleteWallpaperRecord(r.id)));
+
+  for (const entry of backup.customSounds || []) {
+    const blob = base64ToBlob(entry.dataUrl, entry.mimeType);
+    await saveCustomSoundRecord(entry.id, entry.displayName, blob);
+  }
+  for (const entry of backup.wallpaperPhotos || []) {
+    const blob = base64ToBlob(entry.dataUrl, entry.mimeType);
+    await saveWallpaperRecord(entry.id, blob);
+  }
+}
+
+function setupBackupSettings() {
+  byId("backup-export-btn")?.addEventListener("click", () => {
+    exportBackup();
+  });
+
+  const importInput = byId("backup-import-input");
+  importInput?.addEventListener("change", async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = ""; // lets the same filename be re-selected later
+    if (!file) return;
+
+    const hint = byId("backup-import-hint");
+    const showHint = (text) => {
+      if (!hint) return;
+      hint.textContent = text;
+      hint.classList.toggle("hidden", !text);
+    };
+
+    if (!confirm("Restoring a backup replaces every current setting, sound, and wallpaper photo. Continue?")) {
+      return;
+    }
+
+    showHint("Restoring...");
+    try {
+      await importBackup(file);
+      showHint("Restored - reloading...");
+      setTimeout(() => location.reload(), 800);
+    } catch (err) {
+      showHint("Restore failed: " + err.message);
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
 
@@ -5821,6 +5983,7 @@ function init() {
   setupWorldClock();
   setupBreathingMode();
   setupDailyQuote();
+  setupBackupSettings();
   loadTodayInHistory();
 
   renderSchedule();

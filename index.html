@@ -651,6 +651,15 @@
       </div>
 
       <div class="settings-section">
+        <h2 class="settings-title">Backup</h2>
+        <div class="settings-text-hint">Everything lives only in this browser - every setting, the Agenda, every Journal entry, every imported sound and photo. Export a backup file, or restore one on a fresh install.</div>
+        <button class="settings-add-btn" type="button" id="backup-export-btn">Export Backup</button>
+        <label class="settings-add-btn settings-btn-secondary settings-file-label" id="backup-import-label" for="backup-import-input">Import Backup</label>
+        <input type="file" id="backup-import-input" accept="application/json" class="settings-file-input" />
+        <div class="settings-text-hint hidden" id="backup-import-hint"></div>
+      </div>
+
+      <div class="settings-section">
         <h2 class="settings-title">Theme</h2>
         <div class="theme-grid" id="theme-grid">
           <button class="theme-swatch" data-theme-value="default" aria-label="Default theme">

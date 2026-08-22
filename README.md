@@ -171,6 +171,14 @@ over unchanged.
 - **Resilient by default**: the last successful weather fetch is cached
   and shown immediately on load, survives the weather APIs going
   unreachable, and quietly shows a status line instead of ever going blank.
+- **Backup** (Settings → Backup): everything on this dashboard lives only
+  in this one browser's `localStorage`/IndexedDB — every setting, the
+  Agenda, every Journal entry, every imported sound and wallpaper photo.
+  Export bundles all of it into one downloadable JSON file; import
+  restores it (with a confirmation first, since it replaces everything
+  current) on a fresh install or after a cleared profile. The export list
+  itself is built dynamically off whatever keys actually exist rather than
+  a hardcoded list, so it never silently misses something new.
 
 ## Requirements
 
