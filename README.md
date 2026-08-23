@@ -75,11 +75,25 @@ triple-beep that's easy to miss from another room.
   button next to both sound pickers (the per-alarm one and the shared
   default) lets you hear the sound before committing to it, capped at a
   few seconds even for a long ambient loop or custom song.
+- **Sunrise Alarm**: an optional per-alarm "Sunrise wake-up" toggle. When
+  on, the screen itself gradually brightens and warms in color over a
+  configurable window (10–30 min) ahead of that alarm's trigger time,
+  simulating an actual sunrise — like a Hatch/Philips wake-up lamp, built
+  into the display already on the nightstand instead of a separate
+  gadget. Silent the whole time; the real alarm sound and full-brightness
+  ramp still only start at the actual alarm time. A "Skip sunrise" button
+  cancels just that one occurrence without touching the alarm itself.
 - **Sound Machine**: White Noise, Pink Noise, Brown Noise, Rain, Ocean
   Waves, and a Chime, every one synthesized on the spot with the Web Audio
   API and looped gaplessly — no audio files bundled or fetched. Survives a
   reload (resumes whatever was playing, including an in-progress sleep
   timer) via `localStorage` instead of a remembered server-side state.
+- **Soundscape Mixer**: a second Sound Machine mode (segmented alongside
+  Single, Clock/Sound page) that blends up to four sounds together at
+  once, each with its own volume — rain under a low brown-noise hum,
+  white noise plus ocean waves, whatever combination actually works —
+  instead of just one sound at a time. Save a blend as a named preset for
+  one-tap recall later.
 - **Custom sounds**: import your own real audio files (Settings → Custom
   Sounds) — stored locally in IndexedDB, no size practically limiting
   them the way `localStorage` would, and no server involved. They show up
@@ -105,6 +119,20 @@ triple-beep that's easy to miss from another room.
   dedicated full-screen view with a huge centered clock, tomorrow's first
   Agenda item, and the Sound Machine controls, until you tap the exit
   button. Can also enter itself automatically at a scheduled time each night.
+- **Bedtime Briefing**: tap the Goodnight button for a short spoken recap
+  of tomorrow — weather, your first Agenda item, your next alarm — read
+  aloud via the browser's own built-in speech synthesis. No network, no
+  cloud voice service, no API key: the one place this dashboard actually
+  talks back, replacing the one thing an actual Echo Show used to do (via
+  Alexa) that a screen alone otherwise can't.
+- **Night Sky View**: tap "Night Sky" next to the Moon phase (Daily Info
+  page) for which naked-eye planets — Mercury, Venus, Mars, Jupiter,
+  Saturn — plus the Moon are above the horizon right now, and roughly
+  where, as a horizon panorama chart. Computed entirely offline from
+  classical orbital elements (the standard low-precision method used by
+  hobbyist astronomy tools), not fetched from any API — checked against
+  this dashboard's own live sunrise/sunset data during development, and
+  landed within a tenth of a degree of the expected horizon crossing.
 - **Ambient Mode**: after a configurable idle timeout with no touch (never
   while Bedside Mode is active), a screensaver-style view takes over —
   huge clock, tiny weather line, dimmed, a twinkling starfield. Any touch

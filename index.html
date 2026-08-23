@@ -132,6 +132,9 @@
           <button class="icon-button breathing-trigger-btn" id="breathing-trigger-btn" type="button" aria-label="Breathing exercise">
             <span class="icon-slot" id="breathing-trigger-icon" aria-hidden="true"></span>
           </button>
+          <button class="icon-button bedtime-briefing-btn" id="bedtime-briefing-btn" type="button" aria-label="Hear tomorrow's briefing">
+            <span class="icon-slot" id="bedtime-briefing-icon" aria-hidden="true"></span>
+          </button>
           <button class="icon-button bedside-trigger-btn" id="bedside-trigger-btn" type="button" aria-label="Enter Bedside Mode">
             <span class="icon-slot" id="bedside-trigger-icon" aria-hidden="true"></span>
           </button>
@@ -335,6 +338,7 @@
           <div class="weather-range-lg weather-moon-row">
             <span class="moon-visual" id="moon-visual-daily" aria-hidden="true"></span>
             <span id="weather-moon-label-lg"></span>
+            <button class="night-sky-trigger-btn" id="night-sky-trigger-btn" type="button">Night Sky</button>
           </div>
           <div class="weather-rain-lg hidden" id="weather-rain-lg">
             <span class="icon-slot small" id="weather-rain-icon-lg" aria-hidden="true"></span>
@@ -394,41 +398,88 @@
       </header>
 
       <section class="sound-panel-lg" aria-label="Sound Machine">
-        <div class="sound-current sound-current-lg">
-          <span class="icon-slot" id="sound-icon-lg" aria-hidden="true"></span>
-          <span id="sound-name-lg" class="sound-name">Off</span>
-          <div class="sound-controls">
-            <button class="icon-button icon-button-lg" id="sound-play-pause-lg" type="button" aria-label="Play">
-              <span class="icon-slot" id="sound-play-pause-icon-lg" aria-hidden="true"></span>
+        <div class="settings-segmented sound-mode-segmented" id="sound-mode-segmented" role="radiogroup" aria-label="Single sound or mixer">
+          <button class="settings-segment active" type="button" data-mode="single">Single</button>
+          <button class="settings-segment" type="button" data-mode="mixer">Mixer</button>
+        </div>
+
+        <div class="sound-single-view" id="sound-single-view">
+          <div class="sound-current sound-current-lg">
+            <span class="icon-slot" id="sound-icon-lg" aria-hidden="true"></span>
+            <span id="sound-name-lg" class="sound-name">Off</span>
+            <div class="sound-controls">
+              <button class="icon-button icon-button-lg" id="sound-play-pause-lg" type="button" aria-label="Play">
+                <span class="icon-slot" id="sound-play-pause-icon-lg" aria-hidden="true"></span>
+              </button>
+              <button class="icon-button icon-button-lg" id="sound-stop-lg" type="button" aria-label="Stop">
+                <span class="icon-slot" id="sound-stop-icon-lg" aria-hidden="true"></span>
+              </button>
+            </div>
+          </div>
+
+          <div class="sound-row sound-row-lg">
+            <button class="icon-button icon-button-small" id="sound-mute-lg" type="button" aria-label="Mute">
+              <span class="icon-slot small" id="volume-icon-lg" aria-hidden="true"></span>
             </button>
-            <button class="icon-button icon-button-lg" id="sound-stop-lg" type="button" aria-label="Stop">
-              <span class="icon-slot" id="sound-stop-icon-lg" aria-hidden="true"></span>
+            <input type="range" id="sound-volume-lg" class="sound-volume sound-volume-lg" min="0" max="100" value="50" aria-label="Volume" />
+            <span class="sound-volume-label" id="sound-volume-label-lg">50%</span>
+          </div>
+
+          <div class="sound-row sound-row-lg">
+            <select class="sound-select sound-select-lg" id="sound-picker-lg" aria-label="Choose sound"></select>
+            <select class="sound-select sound-select-lg" id="timer-picker-lg" aria-label="Sleep timer">
+              <option value="off">Timer: Off</option>
+              <option value="15">Timer: 15m</option>
+              <option value="30">Timer: 30m</option>
+              <option value="45">Timer: 45m</option>
+              <option value="60">Timer: 1h</option>
+              <option value="120">Timer: 2h</option>
+              <option value="untilAlarm">Timer: Alarm</option>
+            </select>
+          </div>
+
+          <div class="sound-recent hidden" id="sound-recent" aria-label="Recently played sounds"></div>
+        </div>
+
+        <div class="sound-mixer-view hidden" id="sound-mixer-view">
+          <div class="mixer-layers" id="mixer-layers">
+            <div class="mixer-layer-row">
+              <select class="sound-select" id="mixer-layer-picker-0" aria-label="Layer 1 sound"></select>
+              <input type="range" id="mixer-layer-volume-0" class="mixer-layer-volume" min="0" max="100" value="50" aria-label="Layer 1 volume" />
+            </div>
+            <div class="mixer-layer-row">
+              <select class="sound-select" id="mixer-layer-picker-1" aria-label="Layer 2 sound"></select>
+              <input type="range" id="mixer-layer-volume-1" class="mixer-layer-volume" min="0" max="100" value="50" aria-label="Layer 2 volume" />
+            </div>
+            <div class="mixer-layer-row">
+              <select class="sound-select" id="mixer-layer-picker-2" aria-label="Layer 3 sound"></select>
+              <input type="range" id="mixer-layer-volume-2" class="mixer-layer-volume" min="0" max="100" value="50" aria-label="Layer 3 volume" />
+            </div>
+            <div class="mixer-layer-row">
+              <select class="sound-select" id="mixer-layer-picker-3" aria-label="Layer 4 sound"></select>
+              <input type="range" id="mixer-layer-volume-3" class="mixer-layer-volume" min="0" max="100" value="50" aria-label="Layer 4 volume" />
+            </div>
+          </div>
+
+          <div class="sound-row sound-row-lg">
+            <button class="icon-button icon-button-lg" id="mixer-play-pause-btn" type="button" aria-label="Play mix">
+              <span class="icon-slot" id="mixer-play-pause-icon" aria-hidden="true"></span>
             </button>
+            <select class="sound-select sound-select-lg" id="mixer-timer-picker" aria-label="Mixer sleep timer">
+              <option value="off">Timer: Off</option>
+              <option value="15">Timer: 15m</option>
+              <option value="30">Timer: 30m</option>
+              <option value="45">Timer: 45m</option>
+              <option value="60">Timer: 1h</option>
+            </select>
+          </div>
+
+          <div class="mixer-presets-row" id="mixer-presets-row"></div>
+          <div class="mixer-save-row">
+            <input type="text" id="mixer-preset-name-input" class="settings-text-input" placeholder="Blend name…" maxlength="30" autocomplete="off" aria-label="Blend name" />
+            <button class="settings-add-btn" type="button" id="mixer-save-preset-btn">Save Blend</button>
           </div>
         </div>
-
-        <div class="sound-row sound-row-lg">
-          <button class="icon-button icon-button-small" id="sound-mute-lg" type="button" aria-label="Mute">
-            <span class="icon-slot small" id="volume-icon-lg" aria-hidden="true"></span>
-          </button>
-          <input type="range" id="sound-volume-lg" class="sound-volume sound-volume-lg" min="0" max="100" value="50" aria-label="Volume" />
-          <span class="sound-volume-label" id="sound-volume-label-lg">50%</span>
-        </div>
-
-        <div class="sound-row sound-row-lg">
-          <select class="sound-select sound-select-lg" id="sound-picker-lg" aria-label="Choose sound"></select>
-          <select class="sound-select sound-select-lg" id="timer-picker-lg" aria-label="Sleep timer">
-            <option value="off">Timer: Off</option>
-            <option value="15">Timer: 15m</option>
-            <option value="30">Timer: 30m</option>
-            <option value="45">Timer: 45m</option>
-            <option value="60">Timer: 1h</option>
-            <option value="120">Timer: 2h</option>
-            <option value="untilAlarm">Timer: Alarm</option>
-          </select>
-        </div>
-
-        <div class="sound-recent hidden" id="sound-recent" aria-label="Recently played sounds"></div>
       </section>
     </section>
 
@@ -449,6 +500,17 @@
         </button>
       </div>
 
+      <div class="wakealarm-default-sound-row">
+        <span class="wakealarm-default-sound-label">Sunrise length</span>
+        <select class="sound-select" id="wakealarm-sunrise-duration-picker" aria-label="Sunrise length">
+          <option value="10">10 min</option>
+          <option value="15">15 min</option>
+          <option value="20">20 min</option>
+          <option value="25">25 min</option>
+          <option value="30">30 min</option>
+        </select>
+      </div>
+
       <ul class="wakealarm-list" id="wakealarm-list">
         <li class="wakealarm-empty">No alarms set</li>
       </ul>
@@ -463,6 +525,10 @@
           <button class="icon-button-small sound-preview-btn" id="wakealarm-sound-preview-btn" type="button" aria-pressed="false" aria-label="Preview alarm sound">
             <span class="icon-slot" id="wakealarm-sound-preview-icon" aria-hidden="true"></span>
           </button>
+        </div>
+        <div class="wakealarm-form-row">
+          <span class="wakealarm-sunrise-label">Sunrise wake-up</span>
+          <button class="settings-switch" id="wakealarm-sunrise-toggle" role="switch" aria-checked="false" aria-label="Gradually brighten the screen before this alarm"></button>
         </div>
         <div class="wakealarm-form-row">
           <div class="wakealarm-days" id="wakealarm-days" role="group" aria-label="Repeat on"></div>
@@ -984,6 +1050,15 @@
     <div class="habit-history-grid" id="habit-history-grid"></div>
   </div>
 
+  <!-- Sunrise Alarm - a slow, silent color/brightness ramp shown ahead of
+       an alarm with "Sunrise wake-up" on (see checkSunriseAlarms() in
+       script.js), so the room is already gently lit by the time the alarm
+       itself rings. Below the ringing overlay's z-index - a real alarm
+       always takes over cleanly the moment its time arrives. -->
+  <div class="sunrise-overlay hidden" id="sunrise-overlay" aria-hidden="true">
+    <button class="sunrise-skip-btn" id="sunrise-skip-btn" type="button">Skip sunrise</button>
+  </div>
+
   <!-- Outside the pager so it covers whichever page is active when an
        alarm fires - see startWakeAlarmRinging() in script.js. -->
   <div class="alarm-ringing-overlay hidden" id="alarm-ringing-overlay" role="alertdialog" aria-label="Alarm ringing">
@@ -1103,6 +1178,21 @@
   <div class="breathing-overlay hidden" id="breathing-overlay" aria-label="Breathing exercise, tap anywhere to exit">
     <div class="breathing-circle" id="breathing-circle"></div>
     <div class="breathing-label" id="breathing-label">Breathe in</div>
+  </div>
+
+  <!-- Night Sky View - which naked-eye planets and the Moon are above the
+       horizon right now, computed offline (see currentSkyPositions() in
+       script.js). Same "summoned full-screen overlay, tap anywhere to
+       exit" shape as Breathing Mode. -->
+  <div class="night-sky-overlay hidden" id="night-sky-overlay" aria-label="Night sky, tap anywhere to exit">
+    <div class="night-sky-header">
+      <span class="moon-visual" id="moon-visual-nightsky" aria-hidden="true"></span>
+      <span id="night-sky-moon-label"></span>
+    </div>
+    <div class="night-sky-chart-wrap">
+      <svg class="night-sky-chart" id="night-sky-chart" viewBox="0 0 360 150" preserveAspectRatio="xMidYMid meet" aria-hidden="true"></svg>
+    </div>
+    <div class="night-sky-list" id="night-sky-list"></div>
   </div>
 
   <script src="script.js"></script>

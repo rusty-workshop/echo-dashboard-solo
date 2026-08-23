@@ -1281,6 +1281,7 @@ function updateClock() {
   }
   renderWeatherBgActiveHint();
   checkWakeAlarms();
+  checkSunriseAlarms();
   renderWorldClocks();
 
   // Cheap and idempotent (showWallpaperPhoto() no-ops once the right
@@ -1365,6 +1366,257 @@ function renderMoonPhaseVisual(id, date) {
   el.className = el.className.replace(/\bmoon-visual--phase-\d+\b/, "").trim();
   el.classList.add("moon-visual", `moon-visual--phase-${index}`);
   el.setAttribute("aria-label", MOON_PHASE_NAMES[index]);
+}
+
+// ---------------------------------------------------------------------------
+// Night Sky View - which naked-eye planets (Mercury, Venus, Mars, Jupiter,
+// Saturn) plus the Moon are actually above the horizon right now, and
+// roughly where. Computed entirely offline from classical Keplerian
+// orbital elements (the standard low-precision method - see Paul
+// Schlyter's widely-used "Computing planetary positions" tutorial), not
+// fetched from any astronomy API - in keeping with this fork's "no
+// backend, works offline" ethos, and because there's no free, reliable,
+// no-auth astronomy API to depend on anyway.
+//
+// This intentionally skips the small orbital-perturbation correction terms
+// real ephemeris software applies (planets tugging on each other's orbits)
+// - the base two-body ellipse alone is accurate to well under a degree for
+// every body here, over any date this dashboard will realistically run on.
+// That's plenty for "is Jupiter up, and roughly which direction" - this is
+// a bedside decoration, not a telescope pointing tool.
+// ---------------------------------------------------------------------------
+
+const DEG_TO_RAD = Math.PI / 180;
+const RAD_TO_DEG = 180 / Math.PI;
+
+function normalizeDegrees(deg) {
+  let d = deg % 360;
+  if (d < 0) d += 360;
+  return d;
+}
+
+/** Schlyter's "d" - days since 1999 Dec 31, 00:00 UT, the reference epoch
+ *  his orbital-element formulas below are all written against. */
+function schlyterDays(date) {
+  const julianDate = date.getTime() / 86400000 + 2440587.5;
+  return julianDate - 2451543.5;
+}
+
+// One row per body: N=longitude of ascending node, i=inclination,
+// w=argument of perihelion, a=semi-major axis (AU; Earth radii for the
+// Moon), e=eccentricity, M=mean anomaly - each a base value plus a
+// per-day rate, straight from Schlyter's reference tables. The Sun is
+// modeled as an N=i=0 body "orbiting" Earth, which is mathematically
+// equivalent to Earth orbiting the Sun for everything computed below.
+const ORBITAL_ELEMENTS = {
+  sun: {
+    N: [0, 0],
+    i: [0, 0],
+    w: [282.9404, 4.70935e-5],
+    a: [1.0, 0],
+    e: [0.016709, -1.151e-9],
+    M: [356.047, 0.9856002585],
+  },
+  moon: {
+    N: [125.1228, -0.0529538083],
+    i: [5.1454, 0],
+    w: [318.0634, 0.1643573223],
+    a: [60.2666, 0],
+    e: [0.0549, 0],
+    M: [115.3654, 13.0649929509],
+  },
+  mercury: {
+    N: [48.3313, 3.24587e-5],
+    i: [7.0047, 5.0e-8],
+    w: [29.1241, 1.01444e-5],
+    a: [0.387098, 0],
+    e: [0.205635, 5.59e-10],
+    M: [168.6562, 4.0923344368],
+  },
+  venus: {
+    N: [76.6799, 2.4659e-5],
+    i: [3.3946, 2.75e-8],
+    w: [54.891, 1.38374e-5],
+    a: [0.72333, 0],
+    e: [0.006773, -1.302e-9],
+    M: [48.0052, 1.6021302244],
+  },
+  mars: {
+    N: [49.5574, 2.11081e-5],
+    i: [1.8497, -1.78e-8],
+    w: [286.5016, 2.92961e-5],
+    a: [1.523688, 0],
+    e: [0.093405, 2.516e-9],
+    M: [18.6021, 0.5240207766],
+  },
+  jupiter: {
+    N: [100.4542, 2.76854e-5],
+    i: [1.303, -1.557e-7],
+    w: [273.8777, 1.64505e-5],
+    a: [5.20256, 0],
+    e: [0.048498, 4.469e-9],
+    M: [19.895, 0.0830853001],
+  },
+  saturn: {
+    N: [113.6634, 2.3898e-5],
+    i: [2.4886, -1.081e-7],
+    w: [339.3939, 2.97661e-5],
+    a: [9.55475, 0],
+    e: [0.055546, -9.499e-9],
+    M: [316.967, 0.0334442282],
+  },
+};
+
+function elementAt([base, ratePerDay], d) {
+  return base + ratePerDay * d;
+}
+
+/** Solves Kepler's equation (M = E - e*sin(E), all in degrees) for the
+ *  eccentric anomaly E, Newton's method from Schlyter's own starting
+ *  approximation - every eccentricity in ORBITAL_ELEMENTS is well under
+ *  0.21, so this converges in just a few iterations. */
+function eccentricAnomaly(M, e) {
+  const Mrad = M * DEG_TO_RAD;
+  let E = M + e * RAD_TO_DEG * Math.sin(Mrad) * (1 + e * Math.cos(Mrad));
+  for (let i = 0; i < 6; i++) {
+    const Erad = E * DEG_TO_RAD;
+    const delta = (E - e * RAD_TO_DEG * Math.sin(Erad) - M) / (1 - e * Math.cos(Erad));
+    E -= delta;
+    if (Math.abs(delta) < 1e-6) break;
+  }
+  return E;
+}
+
+/** [xh,yh,zh] heliocentric ecliptic rectangular coordinates (AU), plus the
+ *  same position in [r, lon] polar form (lon in degrees) - the shared
+ *  first stage for both the Sun (whose "orbit" IS the Earth-Sun vector
+ *  needed to re-center every other body below) and each planet. */
+function heliocentricPosition(bodyKey, d) {
+  const el = ORBITAL_ELEMENTS[bodyKey];
+  const N = elementAt(el.N, d);
+  const i = elementAt(el.i, d);
+  const w = elementAt(el.w, d);
+  const a = elementAt(el.a, d);
+  const e = elementAt(el.e, d);
+  const M = normalizeDegrees(elementAt(el.M, d));
+
+  const E = eccentricAnomaly(M, e);
+  const Erad = E * DEG_TO_RAD;
+  const xv = a * (Math.cos(Erad) - e);
+  const yv = a * (Math.sqrt(1 - e * e) * Math.sin(Erad));
+
+  const r = Math.sqrt(xv * xv + yv * yv);
+  const v = normalizeDegrees(Math.atan2(yv, xv) * RAD_TO_DEG);
+
+  const Nrad = N * DEG_TO_RAD;
+  const irad = i * DEG_TO_RAD;
+  const vwRad = (v + w) * DEG_TO_RAD;
+
+  const xh = r * (Math.cos(Nrad) * Math.cos(vwRad) - Math.sin(Nrad) * Math.sin(vwRad) * Math.cos(irad));
+  const yh = r * (Math.sin(Nrad) * Math.cos(vwRad) + Math.cos(Nrad) * Math.sin(vwRad) * Math.cos(irad));
+  const zh = r * (Math.sin(vwRad) * Math.sin(irad));
+
+  const lon = normalizeDegrees(Math.atan2(yh, xh) * RAD_TO_DEG);
+  return { xh, yh, zh, r, lon };
+}
+
+/** Geocentric ecliptic [lon, lat] (degrees) for any body - the Moon's own
+ *  orbital elements are already geocentric (it orbits Earth), so its
+ *  heliocentric-stage output IS its geocentric position; every other body
+ *  needs the Sun's Earth-relative position added in to re-center from
+ *  "around the Sun" to "around the Earth". */
+function geocentricEclipticPosition(bodyKey, d, sunHelio) {
+  if (bodyKey === "moon" || bodyKey === "sun") {
+    const h = heliocentricPosition(bodyKey, d);
+    const lat = normalizeDegrees(Math.atan2(h.zh, Math.sqrt(h.xh * h.xh + h.yh * h.yh)) * RAD_TO_DEG);
+    return { lon: h.lon, lat: lat > 180 ? lat - 360 : lat };
+  }
+
+  const h = heliocentricPosition(bodyKey, d);
+  const xs = sunHelio.r * Math.cos(sunHelio.lon * DEG_TO_RAD);
+  const ys = sunHelio.r * Math.sin(sunHelio.lon * DEG_TO_RAD);
+  const xg = h.xh + xs;
+  const yg = h.yh + ys;
+  const zg = h.zh;
+
+  const lon = normalizeDegrees(Math.atan2(yg, xg) * RAD_TO_DEG);
+  let lat = Math.atan2(zg, Math.sqrt(xg * xg + yg * yg)) * RAD_TO_DEG;
+  return { lon, lat };
+}
+
+/** Geocentric ecliptic [lon, lat] -> equatorial [ra, dec] (degrees),
+ *  rotating by Earth's axial tilt (the obliquity of the ecliptic). */
+function eclipticToEquatorial(lon, lat, obliquityDeg) {
+  const lonRad = lon * DEG_TO_RAD;
+  const latRad = lat * DEG_TO_RAD;
+  const eclRad = obliquityDeg * DEG_TO_RAD;
+
+  const xeq = Math.cos(lonRad) * Math.cos(latRad);
+  const yeq = Math.sin(lonRad) * Math.cos(latRad) * Math.cos(eclRad) - Math.sin(latRad) * Math.sin(eclRad);
+  const zeq = Math.sin(lonRad) * Math.cos(latRad) * Math.sin(eclRad) + Math.sin(latRad) * Math.cos(eclRad);
+
+  const ra = normalizeDegrees(Math.atan2(yeq, xeq) * RAD_TO_DEG);
+  const dec = Math.atan2(zeq, Math.sqrt(xeq * xeq + yeq * yeq)) * RAD_TO_DEG;
+  return { ra, dec };
+}
+
+/** Equatorial [ra, dec] -> horizontal [alt, az] (degrees) for an observer
+ *  at [latitude, longitude] and Greenwich Mean Sidereal Time gmst
+ *  (degrees) - az is compass convention (0=North, 90=East, 180=South,
+ *  270=West), matching how this gets labeled in the UI. */
+function equatorialToHorizontal(ra, dec, gmstDeg, observerLat, observerLon) {
+  const lst = normalizeDegrees(gmstDeg + observerLon);
+  const ha = normalizeDegrees(lst - ra) * DEG_TO_RAD;
+  const decRad = dec * DEG_TO_RAD;
+  const latRad = observerLat * DEG_TO_RAD;
+
+  const x = Math.cos(ha) * Math.cos(decRad);
+  const y = Math.sin(ha) * Math.cos(decRad);
+  const z = Math.sin(decRad);
+
+  const xhor = x * Math.sin(latRad) - z * Math.cos(latRad);
+  const yhor = y;
+  const zhor = x * Math.cos(latRad) + z * Math.sin(latRad);
+
+  const az = normalizeDegrees(Math.atan2(yhor, xhor) * RAD_TO_DEG + 180);
+  const alt = Math.atan2(zhor, Math.sqrt(xhor * xhor + yhor * yhor)) * RAD_TO_DEG;
+  return { alt, az };
+}
+
+/** [{key, alt, az}] for every body in ORBITAL_ELEMENTS except the Sun
+ *  (that one's only needed internally, as the Earth-Sun vector every
+ *  planet's geocentric position is computed relative to - a Night Sky
+ *  view has no use for "where the Sun is" once it's below the horizon). */
+function currentSkyPositions(date, lat = HOME_LATITUDE, lon = HOME_LONGITUDE) {
+  const d = schlyterDays(date);
+  const obliquity = 23.4393 - 3.563e-7 * d;
+
+  const sunHelio = heliocentricPosition("sun", d);
+  // Sun's own mean longitude (Ls = w + M, N=0 for this model) is also
+  // Schlyter's shortcut to Greenwich Mean Sidereal Time at 0h UT - see
+  // GMST0 below.
+  const sunEl = ORBITAL_ELEMENTS.sun;
+  const sunMeanLongitude = normalizeDegrees(elementAt(sunEl.w, d) + elementAt(sunEl.M, d));
+
+  const utHours = date.getUTCHours() + date.getUTCMinutes() / 60 + date.getUTCSeconds() / 3600;
+  const gmst = normalizeDegrees(sunMeanLongitude + 180 + utHours * 15);
+
+  const results = {};
+  for (const key of Object.keys(ORBITAL_ELEMENTS)) {
+    if (key === "sun") continue;
+    const { lon: eclLon, lat: eclLat } = geocentricEclipticPosition(key, d, sunHelio);
+    const { ra, dec } = eclipticToEquatorial(eclLon, eclLat, obliquity);
+    const { alt, az } = equatorialToHorizontal(ra, dec, gmst, lat, lon);
+    results[key] = { alt, az };
+  }
+  return results;
+}
+
+const COMPASS_DIRECTIONS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"];
+
+function compassDirection(azDeg) {
+  const index = Math.round(normalizeDegrees(azDeg) / 22.5) % 16;
+  return COMPASS_DIRECTIONS[index];
 }
 
 // ---------------------------------------------------------------------------
@@ -1820,6 +2072,82 @@ function renderBedsideTomorrow() {
   }
   const time = firstEvent.time ? formatTimeOfDay(firstEvent.time) : "all day";
   el.textContent = `Tomorrow: ${firstEvent.title} at ${time}`;
+}
+
+// ---------------------------------------------------------------------------
+// Bedtime Briefing - a short spoken recap of tomorrow (weather, first
+// Agenda item, next alarm), read aloud via the browser's own built-in
+// speech synthesis when you tap the Goodnight button. No network, no cloud
+// voice service, no API key - this is the one place the dashboard actually
+// talks back, the one thing an actual Echo Show used to do (via Alexa)
+// that a screen alone otherwise can't.
+// ---------------------------------------------------------------------------
+
+/** Composes from whatever's already loaded (lastWeatherData, agendaItems,
+ *  wakeAlarms) rather than fetching anything new - if weather hasn't
+ *  loaded yet, or there's no Agenda item or alarm, that sentence is just
+ *  skipped rather than reading a gap or a "null" out loud. */
+function buildBedtimeBriefingText() {
+  const sentences = [];
+
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  const tomorrowForecast = lastWeatherData?.dailyForecast?.[1];
+  if (tomorrowForecast) {
+    sentences.push(
+      `Tomorrow looks ${tomorrowForecast.condition.toLowerCase()}, with a high of ${displayTemp(tomorrowForecast.high)} and a low of ${displayTemp(tomorrowForecast.low)}.`
+    );
+  }
+
+  const firstEvent = agendaEntriesForDate(localDateKey(tomorrow))[0];
+  if (firstEvent) {
+    const time = firstEvent.time ? formatTimeOfDay(firstEvent.time) : "sometime tomorrow";
+    sentences.push(`Your first thing tomorrow is ${firstEvent.title}, at ${time}.`);
+  }
+
+  const nextAlarm = nextWakeAlarmOccurrence();
+  if (nextAlarm) {
+    sentences.push(`Your alarm is set for ${formatTimeOfDay(nextAlarm.hhmm)}.`);
+  }
+
+  if (sentences.length === 0) return "Good night. Sleep well.";
+  return `Good night. ${sentences.join(" ")} Sleep well.`;
+}
+
+function isBedtimeBriefingSpeaking() {
+  return typeof window.speechSynthesis !== "undefined" && window.speechSynthesis.speaking;
+}
+
+/** A second tap while it's already talking stops it - same "tap again to
+ *  cancel" idea as the alarm sound preview button, rather than queuing a
+ *  second utterance or being ignored outright. */
+function speakBedtimeBriefing() {
+  if (typeof window.speechSynthesis === "undefined") return;
+  if (isBedtimeBriefingSpeaking()) {
+    window.speechSynthesis.cancel();
+    return;
+  }
+
+  const utterance = new SpeechSynthesisUtterance(buildBedtimeBriefingText());
+  utterance.rate = 0.95;
+  const btn = byId("bedtime-briefing-btn");
+  utterance.onstart = () => btn?.classList.add("speaking");
+  utterance.onend = () => btn?.classList.remove("speaking");
+  utterance.onerror = () => btn?.classList.remove("speaking");
+  window.speechSynthesis.speak(utterance);
+}
+
+function setupBedtimeBriefing() {
+  const btn = byId("bedtime-briefing-btn");
+  if (typeof window.speechSynthesis === "undefined") {
+    // No speech synthesis in this WebView - hide the button entirely
+    // rather than leaving a control that silently does nothing.
+    btn?.classList.add("hidden");
+    return;
+  }
+  setIcon("bedtime-briefing-icon", "speaker");
+  btn?.addEventListener("click", speakBedtimeBriefing);
 }
 
 /** "Next Alarm" now means the soonest enabled Wake Alarm - see
@@ -2638,6 +2966,17 @@ function populateSoundPickers() {
   if (wakeAlarmPicker) wakeAlarmPicker.innerHTML = `<option value="">Default</option>${optionsHtml}`;
   const defaultAlarmSoundPicker = byId("wakealarm-default-sound-picker");
   if (defaultAlarmSoundPicker) defaultAlarmSoundPicker.innerHTML = optionsHtml;
+
+  // Each Mixer layer can also be "Off" (the wake-alarm picker's "Default"
+  // option doesn't apply here - there's no fallback sound for a layer,
+  // silence is a perfectly normal choice for an unused slot).
+  for (let i = 0; i < MIXER_LAYER_COUNT; i++) {
+    const picker = byId(`mixer-layer-picker-${i}`);
+    if (!picker) continue;
+    picker.innerHTML = `<option value="">Off</option>${optionsHtml}`;
+    picker.value = mixerLayers[i].soundId || "";
+  }
+
   renderRecentSounds();
 }
 
@@ -3395,6 +3734,261 @@ function setupSoundControls() {
 }
 
 // ---------------------------------------------------------------------------
+// Soundscape Mixer - a second Sound Machine mode (segmented alongside
+// Single, Clock/Sound page only) that blends up to MIXER_LAYER_COUNT
+// sounds together, each with its own volume, instead of just one at a
+// time - rain plus a low hum, white noise under ocean waves, whatever
+// combination actually works for falling asleep. Reuses the same shared
+// AudioContext as the Single-sound engine (ensureAudioContext()), so the
+// existing autoplay-unlock handled by the page's pointerdown listener
+// covers this for free - but each layer gets its own independent
+// GainNode/BufferSourceNode, entirely separate from the Single engine's
+// currentSource/gainNode. Starting one engine always stops the other so
+// they can never play over each other.
+// ---------------------------------------------------------------------------
+
+const MIXER_LAYER_COUNT = 4;
+const MIXER_STATE_KEY = "aurora-dashboard:mixer-layers"; // [{soundId, volumePercent}, ...]
+const MIXER_PRESETS_KEY = "aurora-dashboard:mixer-presets"; // [{id, name, layers}]
+
+function loadMixerLayers() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(MIXER_STATE_KEY) || "null");
+    if (Array.isArray(parsed) && parsed.length === MIXER_LAYER_COUNT) return parsed;
+  } catch (err) {
+    // fall through to defaults
+  }
+  return Array.from({ length: MIXER_LAYER_COUNT }, () => ({ soundId: "", volumePercent: 50 }));
+}
+
+let mixerLayers = loadMixerLayers();
+
+function saveMixerLayerState() {
+  localStorage.setItem(MIXER_STATE_KEY, JSON.stringify(mixerLayers));
+}
+
+function loadMixerPresets() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(MIXER_PRESETS_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+    return [];
+  }
+}
+
+let mixerPresets = loadMixerPresets();
+
+function saveMixerPresets() {
+  localStorage.setItem(MIXER_PRESETS_KEY, JSON.stringify(mixerPresets));
+}
+
+let mixerPlaying = false;
+let mixerSources = new Array(MIXER_LAYER_COUNT).fill(null);
+let mixerGains = new Array(MIXER_LAYER_COUNT).fill(null);
+let mixerSleepTimerHandle = null;
+
+async function startMixerLayer(index) {
+  const layer = mixerLayers[index];
+  if (!layer.soundId) return;
+  const ctx = ensureAudioContext();
+  const buffer = await loadSoundBuffer(layer.soundId);
+  // mixerPlaying can have been cleared by a Stop tap while this await was
+  // in flight (a custom sound's decodeAudioData() isn't instant) - bail
+  // rather than starting a layer nobody asked to hear anymore.
+  if (!mixerPlaying) return;
+  const source = ctx.createBufferSource();
+  source.buffer = buffer;
+  source.loop = true;
+  const gain = ctx.createGain();
+  gain.gain.value = layer.volumePercent / 100;
+  source.connect(gain);
+  gain.connect(ctx.destination);
+  source.start(0);
+  mixerSources[index] = source;
+  mixerGains[index] = gain;
+}
+
+function stopMixerLayer(index) {
+  const source = mixerSources[index];
+  if (source) {
+    try {
+      source.stop();
+    } catch (err) {
+      // Already stopped - fine.
+    }
+    mixerSources[index] = null;
+  }
+  mixerGains[index] = null;
+}
+
+function cancelMixerSleepTimer() {
+  if (mixerSleepTimerHandle) {
+    clearTimeout(mixerSleepTimerHandle);
+    mixerSleepTimerHandle = null;
+  }
+}
+
+async function startMixerPlayback() {
+  stopLocalPlaybackFully(); // mutual exclusion with the Single engine
+  mixerPlaying = true;
+  const ctx = ensureAudioContext();
+  if (ctx.state === "suspended") ctx.resume().catch(() => {});
+  for (let i = 0; i < MIXER_LAYER_COUNT; i++) {
+    await startMixerLayer(i);
+  }
+}
+
+function stopMixerPlayback() {
+  mixerPlaying = false;
+  for (let i = 0; i < MIXER_LAYER_COUNT; i++) stopMixerLayer(i);
+  cancelMixerSleepTimer();
+}
+
+function setMixerLayerVolume(index, percent) {
+  mixerLayers[index].volumePercent = percent;
+  if (mixerGains[index]) mixerGains[index].gain.value = percent / 100;
+}
+
+async function setMixerLayerSound(index, soundId) {
+  mixerLayers[index].soundId = soundId;
+  if (mixerPlaying) {
+    stopMixerLayer(index);
+    await startMixerLayer(index);
+  }
+}
+
+function renderMixerPlayButton() {
+  const btn = byId("mixer-play-pause-btn");
+  if (!btn) return;
+  btn.setAttribute("aria-label", mixerPlaying ? "Stop mix" : "Play mix");
+  setIcon("mixer-play-pause-icon", mixerPlaying ? "pause" : "play");
+}
+
+function renderMixerLayers() {
+  for (let i = 0; i < MIXER_LAYER_COUNT; i++) {
+    const picker = byId(`mixer-layer-picker-${i}`);
+    if (picker) picker.value = mixerLayers[i].soundId || "";
+    const volumeInput = byId(`mixer-layer-volume-${i}`);
+    if (volumeInput) volumeInput.value = String(mixerLayers[i].volumePercent);
+  }
+}
+
+function renderMixerPresets() {
+  const container = byId("mixer-presets-row");
+  if (!container) return;
+  if (mixerPresets.length === 0) {
+    container.innerHTML = "";
+    return;
+  }
+  container.innerHTML = mixerPresets
+    .map(
+      (preset) => `<div class="mixer-preset-chip-wrap">
+        <button class="mixer-preset-chip" type="button" data-id="${escapeHtml(preset.id)}">${escapeHtml(preset.name)}</button>
+        <button class="icon-button-small mixer-preset-remove" type="button" data-id="${escapeHtml(preset.id)}" aria-label="Delete ${escapeHtml(preset.name)}">
+          <span class="icon-slot tiny" aria-hidden="true">${ICONS.close}</span>
+        </button>
+      </div>`
+    )
+    .join("");
+}
+
+async function applyMixerPreset(preset) {
+  mixerLayers = preset.layers.map((layer) => ({ ...layer }));
+  saveMixerLayerState();
+  renderMixerLayers();
+  if (mixerPlaying) {
+    stopMixerPlayback();
+    await startMixerPlayback();
+    renderMixerPlayButton();
+  }
+}
+
+function setupSoundscapeMixer() {
+  for (let i = 0; i < MIXER_LAYER_COUNT; i++) {
+    const picker = byId(`mixer-layer-picker-${i}`);
+    picker?.addEventListener("change", async () => {
+      await setMixerLayerSound(i, picker.value);
+      saveMixerLayerState();
+    });
+
+    const volumeInput = byId(`mixer-layer-volume-${i}`);
+    volumeInput?.addEventListener("input", () => {
+      const percent = Number(volumeInput.value);
+      setMixerLayerVolume(i, percent);
+      saveMixerLayerState();
+    });
+  }
+
+  byId("mixer-play-pause-btn")?.addEventListener("click", async () => {
+    if (mixerPlaying) {
+      stopMixerPlayback();
+    } else {
+      await startMixerPlayback();
+    }
+    renderMixerPlayButton();
+  });
+
+  byId("mixer-timer-picker")?.addEventListener("change", (event) => {
+    cancelMixerSleepTimer();
+    const minutes = Number(event.target.value);
+    if (!minutes) return;
+    mixerSleepTimerHandle = setTimeout(() => {
+      mixerSleepTimerHandle = null;
+      stopMixerPlayback();
+      renderMixerPlayButton();
+    }, minutes * 60_000);
+  });
+
+  byId("mixer-save-preset-btn")?.addEventListener("click", () => {
+    const nameInput = byId("mixer-preset-name-input");
+    const name = nameInput?.value.trim();
+    if (!name) return;
+    mixerPresets.push({ id: `mixerpreset-${Date.now()}`, name, layers: mixerLayers.map((l) => ({ ...l })) });
+    saveMixerPresets();
+    renderMixerPresets();
+    if (nameInput) nameInput.value = "";
+  });
+
+  byId("mixer-presets-row")?.addEventListener("click", (event) => {
+    const removeBtn = event.target.closest(".mixer-preset-remove");
+    if (removeBtn) {
+      mixerPresets = mixerPresets.filter((p) => p.id !== removeBtn.dataset.id);
+      saveMixerPresets();
+      renderMixerPresets();
+      return;
+    }
+    const chip = event.target.closest(".mixer-preset-chip");
+    if (!chip) return;
+    const preset = mixerPresets.find((p) => p.id === chip.dataset.id);
+    if (preset) applyMixerPreset(preset);
+  });
+
+  const segmented = byId("sound-mode-segmented");
+  segmented?.addEventListener("click", (event) => {
+    const btn = event.target.closest(".settings-segment");
+    if (!btn) return;
+    segmented.querySelectorAll(".settings-segment").forEach((b) => b.classList.toggle("active", b === btn));
+    byId("sound-single-view")?.classList.toggle("hidden", btn.dataset.mode !== "single");
+    byId("sound-mixer-view")?.classList.toggle("hidden", btn.dataset.mode !== "mixer");
+    // Switching modes always stops whichever engine was playing for the
+    // OTHER mode - same mutual-exclusion rule as pressing either engine's
+    // own Play button, just triggered by the mode switch itself instead.
+    if (btn.dataset.mode === "mixer") {
+      stopLocalPlaybackFully();
+      saveSoundState();
+      renderSoundMachine();
+    } else {
+      stopMixerPlayback();
+      renderMixerPlayButton();
+    }
+  });
+
+  renderMixerLayers();
+  renderMixerPresets();
+  renderMixerPlayButton();
+}
+
+// ---------------------------------------------------------------------------
 // Wake Alarms - a self-contained alarm clock, not the phone's stock one
 // (there's no phone at all anymore). Pure localStorage; scheduling is
 // checked once a minute from the same clock tick that already drives
@@ -3533,10 +4127,16 @@ function renderWakeAlarms() {
     .map((alarm) => {
       const time = formatTimeOfDay(`${String(alarm.hour).padStart(2, "0")}:${String(alarm.minute).padStart(2, "0")}`);
       const labelHtml = alarm.label ? `<span class="wakealarm-item-label">${escapeHtml(alarm.label)}</span>` : "";
+      const sunriseHtml = alarm.sunriseEnabled
+        ? `<span class="icon-slot tiny wakealarm-sunrise-icon" aria-label="Sunrise wake-up">${ICONS.sunny}</span>`
+        : "";
       return `<li class="wakealarm-item${alarm.enabled ? "" : " disabled"}" data-id="${escapeHtml(alarm.id)}">
         <input type="checkbox" class="wakealarm-toggle" ${alarm.enabled ? "checked" : ""} aria-label="Enabled" />
         <div class="wakealarm-item-info">
-          <span class="wakealarm-item-time">${time}</span>
+          <div class="wakealarm-item-time-row">
+            <span class="wakealarm-item-time">${time}</span>
+            ${sunriseHtml}
+          </div>
           ${labelHtml}
           <span class="wakealarm-item-days">${escapeHtml(formatWakeAlarmDays(alarm.daysOfWeek))}</span>
         </div>
@@ -3602,6 +4202,11 @@ function setupWakeAlarmForm() {
     localStorage.setItem(DEFAULT_ALARM_SOUND_KEY, defaultAlarmSoundId);
   });
 
+  const sunriseToggle = byId("wakealarm-sunrise-toggle");
+  sunriseToggle?.addEventListener("click", () => {
+    sunriseToggle.setAttribute("aria-checked", String(sunriseToggle.getAttribute("aria-checked") !== "true"));
+  });
+
   byId("wakealarm-add-btn")?.addEventListener("click", () => {
     const timeInput = byId("wakealarm-time-input");
     const labelInput = byId("wakealarm-label-input");
@@ -3617,6 +4222,7 @@ function setupWakeAlarmForm() {
       enabled: true,
       label: labelInput?.value.trim() || "",
       soundId: soundPicker?.value || null,
+      sunriseEnabled: sunriseToggle?.getAttribute("aria-checked") === "true",
     });
 
     if (labelInput) labelInput.value = "";
@@ -3624,6 +4230,7 @@ function setupWakeAlarmForm() {
     byId("wakealarm-days")
       ?.querySelectorAll(".wakealarm-day-btn.active")
       .forEach((btn) => btn.classList.remove("active"));
+    sunriseToggle?.setAttribute("aria-checked", "false");
   });
 }
 
@@ -3827,6 +4434,7 @@ function startWakeAlarmRinging(label, soundId) {
   ringingLabel = label || "Alarm";
   ringingSoundId = soundId;
 
+  stopSunriseAlarm();
   stopLocalPlaybackFully();
   saveSoundState();
   renderSoundMachine();
@@ -3899,6 +4507,140 @@ function checkWakeAlarms() {
   if (!match.daysOfWeek || match.daysOfWeek.length === 0) {
     setWakeAlarm({ ...match, enabled: false });
   }
+}
+
+// ---------------------------------------------------------------------------
+// Sunrise Alarm - an optional per-alarm "Sunrise wake-up" toggle. When on,
+// the screen gradually brightens and warms in color over the configured
+// window (Wake Alarms page's "Sunrise length" picker) leading up to that
+// alarm's trigger time - silent, just light, like a Hatch/Philips wake-up
+// lamp built into the display already sitting on the nightstand. Checked
+// on the same once-a-minute cadence as checkWakeAlarms() (called right
+// alongside it from updateClock()), and always yields cleanly to the real
+// ringing overlay the moment the alarm itself actually fires (see
+// startWakeAlarmRinging()).
+// ---------------------------------------------------------------------------
+
+const SUNRISE_DURATION_KEY = "aurora-dashboard:sunrise-duration-minutes";
+let sunriseDurationMinutes = parseInt(localStorage.getItem(SUNRISE_DURATION_KEY), 10) || 25;
+
+const SUNRISE_BRIGHTNESS_START = 5;
+
+// Four matching color stops (near-horizon -> zenith) for night vs. full
+// dawn - sunriseGradientAt() blends between them by progress, interpolating
+// each stop's RGB independently, so the whole sky brightens and warms
+// together rather than as a flat color swap.
+const SUNRISE_NIGHT_STOPS = [
+  [8, 8, 24],
+  [4, 4, 16],
+  [2, 2, 10],
+  [0, 0, 6],
+];
+const SUNRISE_DAWN_STOPS = [
+  [255, 197, 143],
+  [255, 154, 128],
+  [246, 173, 176],
+  [148, 174, 214],
+];
+
+function sunriseGradientAt(progress) {
+  const stops = SUNRISE_NIGHT_STOPS.map((nightRgb, i) => {
+    const dawnRgb = SUNRISE_DAWN_STOPS[i];
+    const r = Math.round(nightRgb[0] + (dawnRgb[0] - nightRgb[0]) * progress);
+    const g = Math.round(nightRgb[1] + (dawnRgb[1] - nightRgb[1]) * progress);
+    const b = Math.round(nightRgb[2] + (dawnRgb[2] - nightRgb[2]) * progress);
+    return `rgb(${r}, ${g}, ${b})`;
+  });
+  return `linear-gradient(to top, ${stops[0]} 0%, ${stops[1]} 35%, ${stops[2]} 65%, ${stops[3]} 100%)`;
+}
+
+let sunriseActiveAlarmId = null;
+let sunriseSkippedTriggerEpoch = null; // a manually-skipped occurrence, so it doesn't immediately restart
+
+function updateSunriseOverlay(progress) {
+  const overlay = byId("sunrise-overlay");
+  if (overlay) overlay.style.background = sunriseGradientAt(progress);
+  if (window.fully && typeof window.fully.setScreenBrightness === "function") {
+    const brightness = Math.round(SUNRISE_BRIGHTNESS_START + (DAY_SCREEN_BRIGHTNESS - SUNRISE_BRIGHTNESS_START) * progress);
+    window.fully.setScreenBrightness(brightness);
+  }
+}
+
+function startSunriseAlarm(alarmId) {
+  sunriseActiveAlarmId = alarmId;
+  byId("sunrise-overlay")?.classList.remove("hidden");
+  updateSunriseOverlay(0);
+}
+
+function stopSunriseAlarm() {
+  if (!sunriseActiveAlarmId) return;
+  sunriseActiveAlarmId = null;
+  byId("sunrise-overlay")?.classList.add("hidden");
+  // Same reasoning as stopWakeAlarmRinging() - re-derive from scratch
+  // rather than leaving brightness wherever the ramp stopped.
+  isNightMode = null;
+  applyDayNightMode();
+}
+
+/** Checked alongside checkWakeAlarms() from every clock tick (its own
+ *  once-a-minute throttle below keeps this cheap). Finds the soonest
+ *  enabled, sunrise-enabled alarm whose trigger time falls within the
+ *  configured window from now, and keeps the overlay's progress in sync
+ *  with it - or tears the overlay down if nothing currently qualifies
+ *  (the window closed, the alarm got disabled/deleted, or it was skipped). */
+let lastSunriseCheckMinuteKey = null;
+
+function checkSunriseAlarms() {
+  if (isAlarmRinging) {
+    stopSunriseAlarm();
+    return;
+  }
+
+  const now = new Date();
+  const minuteKey = `${localDateKey(now)} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  if (minuteKey === lastSunriseCheckMinuteKey) return;
+  lastSunriseCheckMinuteKey = minuteKey;
+
+  const nowMs = Date.now();
+  const durationMs = sunriseDurationMinutes * 60000;
+  let best = null;
+  for (const alarm of wakeAlarms) {
+    if (!alarm.enabled || !alarm.sunriseEnabled) continue;
+    const triggerEpoch = nextTriggerEpochForAlarm(alarm);
+    if (triggerEpoch == null) continue;
+    if (triggerEpoch === sunriseSkippedTriggerEpoch) continue;
+    const windowStart = triggerEpoch - durationMs;
+    if (nowMs < windowStart || nowMs >= triggerEpoch) continue;
+    if (!best || triggerEpoch < best.triggerEpoch) best = { alarm, triggerEpoch, windowStart };
+  }
+
+  if (!best) {
+    stopSunriseAlarm();
+    return;
+  }
+
+  if (sunriseActiveAlarmId !== best.alarm.id) startSunriseAlarm(best.alarm.id);
+  const progress = Math.min(1, Math.max(0, (nowMs - best.windowStart) / durationMs));
+  updateSunriseOverlay(progress);
+}
+
+function setupSunriseAlarm() {
+  const durationPicker = byId("wakealarm-sunrise-duration-picker");
+  if (durationPicker) {
+    durationPicker.value = String(sunriseDurationMinutes);
+    durationPicker.addEventListener("change", () => {
+      sunriseDurationMinutes = parseInt(durationPicker.value, 10) || 25;
+      localStorage.setItem(SUNRISE_DURATION_KEY, String(sunriseDurationMinutes));
+    });
+  }
+
+  byId("sunrise-skip-btn")?.addEventListener("click", () => {
+    if (sunriseActiveAlarmId) {
+      const alarm = wakeAlarms.find((a) => a.id === sunriseActiveAlarmId);
+      if (alarm) sunriseSkippedTriggerEpoch = nextTriggerEpochForAlarm(alarm);
+    }
+    stopSunriseAlarm();
+  });
 }
 
 const SNOOZE_DURATION_KEY = "aurora-dashboard:snooze-duration";
@@ -6044,6 +6786,112 @@ function setupBreathingMode() {
 }
 
 // ---------------------------------------------------------------------------
+// Night Sky View UI - the summoned overlay for currentSkyPositions() above.
+// Renders a horizon-panorama chart (azimuth along the x-axis, altitude
+// along the y-axis, horizon at the bottom - the same idea as a real
+// "what's up tonight" panorama, just flattened to a strip instead of a
+// projected dome, since that's both simpler to draw correctly and easier
+// to read at a glance than a fisheye-style hemisphere) plus a plain text
+// list underneath. Same "summoned overlay, tap anywhere to exit" shape as
+// Breathing Mode.
+// ---------------------------------------------------------------------------
+
+const NIGHT_SKY_BODY_LABELS = {
+  moon: "Moon",
+  mercury: "Mercury",
+  venus: "Venus",
+  mars: "Mars",
+  jupiter: "Jupiter",
+  saturn: "Saturn",
+};
+
+function altitudeDescription(alt) {
+  if (alt >= 60) return "near overhead";
+  if (alt >= 30) return "high";
+  if (alt >= 10) return "partway up";
+  return "low, near the horizon";
+}
+
+function renderNightSkyChart(visibleBodies) {
+  const svg = byId("night-sky-chart");
+  if (!svg) return;
+
+  const toX = (az) => (az / 360) * 360;
+  const toY = (alt) => 130 - (Math.max(0, Math.min(90, alt)) / 90) * 120;
+
+  const compassTicks = [
+    { label: "N", az: 0 },
+    { label: "E", az: 90 },
+    { label: "S", az: 180 },
+    { label: "W", az: 270 },
+    { label: "N", az: 360 },
+  ]
+    .map((tick) => `<text x="${toX(tick.az)}" y="145" text-anchor="middle" class="night-sky-compass-label">${tick.label}</text>`)
+    .join("");
+
+  const dots = visibleBodies
+    .map((body) => {
+      const x = toX(body.az);
+      const y = toY(body.alt);
+      return `<g>
+          <circle cx="${x}" cy="${y}" r="4" class="night-sky-dot" />
+          <text x="${x}" y="${y - 8}" text-anchor="middle" class="night-sky-dot-label">${NIGHT_SKY_BODY_LABELS[body.key]}</text>
+        </g>`;
+    })
+    .join("");
+
+  svg.innerHTML = `<line x1="0" y1="130" x2="360" y2="130" class="night-sky-horizon-line" />${compassTicks}${dots}`;
+}
+
+function renderNightSkyList(visibleBodies) {
+  const list = byId("night-sky-list");
+  if (!list) return;
+
+  if (visibleBodies.length === 0) {
+    list.innerHTML = '<div class="night-sky-empty">Nothing bright is up right now.</div>';
+    return;
+  }
+
+  list.innerHTML = visibleBodies
+    .map(
+      (body) => `<div class="night-sky-row">
+        <span class="night-sky-row-name">${NIGHT_SKY_BODY_LABELS[body.key]}</span>
+        <span class="night-sky-row-detail">${altitudeDescription(body.alt)} in the ${compassDirection(body.az)}</span>
+      </div>`
+    )
+    .join("");
+}
+
+function renderNightSkyView() {
+  const now = new Date();
+  renderMoonPhaseVisual("moon-visual-nightsky", now);
+  setText("night-sky-moon-label", moonPhaseLabel(now));
+
+  const positions = currentSkyPositions(now);
+  const bodies = Object.entries(positions)
+    .map(([key, pos]) => ({ key, ...pos }))
+    .filter((body) => body.alt > 0)
+    .sort((a, b) => b.alt - a.alt);
+
+  renderNightSkyChart(bodies);
+  renderNightSkyList(bodies);
+}
+
+function enterNightSkyView() {
+  renderNightSkyView();
+  byId("night-sky-overlay")?.classList.remove("hidden");
+}
+
+function exitNightSkyView() {
+  byId("night-sky-overlay")?.classList.add("hidden");
+}
+
+function setupNightSkyView() {
+  byId("night-sky-trigger-btn")?.addEventListener("click", enterNightSkyView);
+  byId("night-sky-overlay")?.addEventListener("click", exitNightSkyView);
+}
+
+// ---------------------------------------------------------------------------
 // Daily quote - a deterministic pick from a small local list, keyed off the
 // day of the year so it's the same all day and changes at midnight. Zero
 // network involved on purpose, unlike Today in History below - there's no
@@ -6712,10 +7560,12 @@ function init() {
   setupBedsideMode();
   setupAmbientMode();
   setupSoundControls();
+  setupSoundscapeMixer();
   restoreSoundStateFromStorage();
   setupCustomSounds();
   setupWakeAlarmForm();
   setupWakeAlarmRingingControls();
+  setupSunriseAlarm();
   setupTimerPage();
   setupUtilitiesPage();
   setupCountdown();
@@ -6747,6 +7597,8 @@ function init() {
   setupAmbientTimeoutSetting();
   setupWorldClock();
   setupBreathingMode();
+  setupNightSkyView();
+  setupBedtimeBriefing();
   setupDailyQuote();
   setupBackupSettings();
   loadTodayInHistory();
