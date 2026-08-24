@@ -1311,10 +1311,41 @@ function updateClock() {
     // midnight, so this is the one place it needs recomputing.
     renderRecurringReminders();
   }
+
+  // Last line on purpose (see the watchdog below) - only reached once
+  // every render call above has actually run to completion, so it's a
+  // real "the clock is genuinely still working" signal, not just "the
+  // interval fired."
+  lastClockTickAt = Date.now();
+}
+
+// ---------------------------------------------------------------------------
+// Stale-clock watchdog - this is meant to run 24/7 on a kiosk device that
+// nobody's going to notice froze until they're trying to use it. A plain
+// setInterval keeps firing on schedule even if one call throws, so this
+// isn't guarding against an ordinary one-off exception - it's guarding
+// against updateClock() hitting a PERSISTENT broken state (an exception on
+// every single call, so nothing after the failure point - including this
+// function's own last line - ever runs again) or the WebView/renderer
+// itself degrading badly enough that ticks stop landing on schedule. A
+// genuinely deadlocked main thread can't run its own watchdog either way
+// (this code wouldn't fire), so this is a defense-in-depth layer against
+// the survivable failure modes, not a guarantee against every one.
+// ---------------------------------------------------------------------------
+
+let lastClockTickAt = Date.now();
+const CLOCK_WATCHDOG_STALE_MS = 5 * 60 * 1000;
+const CLOCK_WATCHDOG_CHECK_MS = 30 * 1000;
+
+function checkClockWatchdog() {
+  if (Date.now() - lastClockTickAt > CLOCK_WATCHDOG_STALE_MS) {
+    location.reload();
+  }
 }
 
 function startClock() {
   updateClock();
+  setInterval(checkClockWatchdog, CLOCK_WATCHDOG_CHECK_MS);
   setInterval(updateClock, 1000);
 }
 
@@ -4441,6 +4472,7 @@ function startWakeAlarmRinging(label, soundId) {
   startWakeAlarmSound(soundId);
   startAlarmBrightnessRamp();
   showAlarmRingingOverlay(ringingLabel);
+  startAlarmVoiceListening();
   // A ringing alarm needs the full-screen dismiss/snooze overlay visible
   // and audible - staying in Bedside Mode's own dim, quiet view would
   // bury it, so an active bedside session ends automatically the moment
@@ -4455,6 +4487,7 @@ function stopWakeAlarmRinging() {
   ringingSoundId = null;
   stopWakeAlarmSound();
   stopAlarmBrightnessRamp();
+  stopAlarmVoiceListening();
   // Re-evaluate day/night brightness from scratch rather than leaving the
   // screen wherever the ramp left it - if it's still nighttime, this puts
   // it back to the dim level instead of stuck bright post-dismiss.
@@ -4645,6 +4678,92 @@ function setupSunriseAlarm() {
 
 const SNOOZE_DURATION_KEY = "aurora-dashboard:snooze-duration";
 
+/** Shared by the Dismiss button and voice ("dismiss"/"stop") below, so
+ *  there's exactly one place that actually stops a ringing alarm. */
+function dismissWakeAlarm() {
+  stopWakeAlarmRinging();
+}
+
+/** Shared by the Snooze button and voice ("snooze") below. */
+function snoozeWakeAlarm() {
+  const minutes = Number(byId("alarm-snooze-duration")?.value || "9");
+  snoozeState = { epochMs: Date.now() + minutes * 60_000, soundId: ringingSoundId, label: ringingLabel };
+  stopWakeAlarmRinging();
+}
+
+// ---------------------------------------------------------------------------
+// Voice dismiss/snooze - while an alarm is actually ringing, listens for
+// "snooze" or "dismiss" via the Web Speech API instead of requiring a tap,
+// the same idea as a real Echo Show's voice control. Scoped tightly to
+// "only while ringing," not always-on listening - simpler, more reliable,
+// and it isn't sitting there listening to the room the rest of the day.
+// Requires microphone permission actually granted to the kiosk browser
+// app (a device/OS-level setting, not something this page can grant
+// itself) and SpeechRecognition support, which not every WebView has -
+// both fail silently into "just use the buttons," never a stuck state.
+// ---------------------------------------------------------------------------
+
+let wakeAlarmRecognition = null;
+
+function startAlarmVoiceListening() {
+  const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognitionCtor) return;
+
+  byId("alarm-voice-hint")?.classList.remove("hidden");
+
+  const recognition = new SpeechRecognitionCtor();
+  recognition.continuous = true;
+  recognition.interimResults = false;
+  recognition.lang = "en-US";
+
+  recognition.onresult = (event) => {
+    const heard = event.results[event.results.length - 1][0].transcript.toLowerCase();
+    if (heard.includes("snooze")) {
+      snoozeWakeAlarm();
+    } else if (heard.includes("dismiss") || heard.includes("stop") || heard.includes("turn off")) {
+      dismissWakeAlarm();
+    }
+  };
+  // A recognition session commonly ends on its own after a pause in
+  // speech, even with continuous:true - restart automatically for as
+  // long as the alarm is still actually ringing, so a moment of silence
+  // doesn't silently stop listening.
+  recognition.onend = () => {
+    if (isAlarmRinging) {
+      try {
+        recognition.start();
+      } catch (err) {
+        // Already starting/started - fine.
+      }
+    }
+  };
+  recognition.onerror = () => {
+    // A denied mic permission or a transient recognizer error - onend
+    // still fires right after this either way, so the restart-while-
+    // ringing logic above already covers retrying.
+  };
+
+  try {
+    recognition.start();
+  } catch (err) {
+    return;
+  }
+  wakeAlarmRecognition = recognition;
+}
+
+function stopAlarmVoiceListening() {
+  byId("alarm-voice-hint")?.classList.add("hidden");
+  if (!wakeAlarmRecognition) return;
+  const recognition = wakeAlarmRecognition;
+  wakeAlarmRecognition = null;
+  recognition.onend = null; // stopping it ourselves - the restart-on-end handler would otherwise immediately restart it
+  try {
+    recognition.stop();
+  } catch (err) {
+    // Already stopped - fine.
+  }
+}
+
 function setupWakeAlarmRingingControls() {
   setIcon("alarm-ringing-icon", "alarm");
 
@@ -4655,14 +4774,8 @@ function setupWakeAlarmRingingControls() {
     localStorage.setItem(SNOOZE_DURATION_KEY, durationPicker.value);
   });
 
-  byId("alarm-dismiss-btn")?.addEventListener("click", () => {
-    stopWakeAlarmRinging();
-  });
-  byId("alarm-snooze-btn")?.addEventListener("click", () => {
-    const minutes = Number(durationPicker?.value || "9");
-    snoozeState = { epochMs: Date.now() + minutes * 60_000, soundId: ringingSoundId, label: ringingLabel };
-    stopWakeAlarmRinging();
-  });
+  byId("alarm-dismiss-btn")?.addEventListener("click", dismissWakeAlarm);
+  byId("alarm-snooze-btn")?.addEventListener("click", snoozeWakeAlarm);
 }
 
 // ---------------------------------------------------------------------------
@@ -7629,4 +7742,21 @@ function init() {
   startWeatherRefreshLoop();
 }
 
+/** Service workers require a secure context (https:, or http://localhost)
+ *  and simply don't register at all under a file: origin - this
+ *  dashboard's real deployment loads via a file:// startURL in Fully
+ *  Kiosk, where register() rejects and this silently no-ops. Still worth
+ *  calling unconditionally: local dev/testing and any future http(s)
+ *  deployment get a cached app shell (survives a brief network drop,
+ *  "Add to Home Screen"-installable) for free, and nothing breaks either
+ *  way under file://. */
+function registerServiceWorker() {
+  if (!("serviceWorker" in navigator)) return;
+  navigator.serviceWorker.register("sw.js").catch(() => {
+    // Expected under file: or any other unsupported context - nothing to
+    // recover from, the dashboard works identically either way.
+  });
+}
+
 document.addEventListener("DOMContentLoaded", init);
+window.addEventListener("load", registerServiceWorker);
