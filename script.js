@@ -132,6 +132,7 @@ const ICONS = {
   globe:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>',
   cart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1"/><circle cx="18" cy="20" r="1"/><path d="M2 3h2l2.4 12.2a2 2 0 0 0 2 1.6h8.6a2 2 0 0 0 2-1.6L21 7H6"/></svg>',
+  mic: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0"/><path d="M12 19v3"/></svg>',
   wind: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h11a3 3 0 1 0-3-3M3 16h15a3 3 0 1 1-3 3M3 12h9a2.5 2.5 0 1 0-2.5-2.5"/></svg>',
   sparkle:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5L18 18M18 6l-2.5 2.5M8.5 15.5L6 18"/><circle cx="12" cy="12" r="2.2" fill="currentColor" stroke="none"/></svg>',
@@ -4692,16 +4693,153 @@ function snoozeWakeAlarm() {
 }
 
 // ---------------------------------------------------------------------------
-// Voice dismiss/snooze - while an alarm is actually ringing, listens for
-// "snooze" or "dismiss" via the Web Speech API instead of requiring a tap,
-// the same idea as a real Echo Show's voice control. Scoped tightly to
-// "only while ringing," not always-on listening - simpler, more reliable,
-// and it isn't sitting there listening to the room the rest of the day.
-// Requires microphone permission actually granted to the kiosk browser
-// app (a device/OS-level setting, not something this page can grant
-// itself) and SpeechRecognition support, which not every WebView has -
-// both fail silently into "just use the buttons," never a stuck state.
+// Voice Commands - a small, fixed vocabulary ("play rain", "set a timer
+// for 10 minutes", "goodnight", "what's the weather"...) dispatched
+// through one shared table, so the ringing-alarm listener below and the
+// general press-to-talk button (see setupVoiceCommandButton() further
+// down) both understand exactly the same phrases. Deliberately NOT
+// always-on listening - only while an alarm's ringing (continuous,
+// restarts itself) or for the few seconds after tapping the mic button
+// (one-shot) - simpler, more reliable, and this isn't sitting there
+// listening to the room all day. Requires microphone permission actually
+// granted to the kiosk browser app (a device/OS-level setting, not
+// something this page can grant itself) and SpeechRecognition support,
+// which not every WebView has - both fail silently into "just use the
+// buttons/taps," never a stuck state.
 // ---------------------------------------------------------------------------
+
+function speakText(text) {
+  if (typeof window.speechSynthesis === "undefined") return;
+  window.speechSynthesis.cancel();
+  window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+}
+
+// First significant word of each built-in sound's display name is enough
+// to uniquely identify it ("play ocean" needn't also say "waves") -
+// checked against SOUND_LIBRARY directly rather than a separate list, so
+// this can never drift out of sync with the actual sound names.
+function findVoiceSoundId(heard) {
+  for (const sound of SOUND_LIBRARY) {
+    const firstWord = sound.displayName.toLowerCase().split(" ")[0];
+    if (heard.includes(firstWord)) return sound.id;
+  }
+  return null;
+}
+
+const TIMER_VOICE_MINUTES = new Set([1, 5, 10, 15, 30, 60]);
+const TIMER_VOICE_NUMBER_WORDS = { one: 1, five: 5, ten: 10, fifteen: 15, thirty: 30, sixty: 60 };
+
+/** Only the durations the Timer page's own presets already offer - "set
+ *  a timer for 7 minutes" is heard fine but silently ignored rather than
+ *  starting an odd one-off duration nothing else in the UI matches. */
+function parseVoiceTimerMinutes(heard) {
+  const digitMatch = heard.match(/(\d+)\s*minute/);
+  if (digitMatch) {
+    const n = Number(digitMatch[1]);
+    return TIMER_VOICE_MINUTES.has(n) ? n : null;
+  }
+  for (const [word, n] of Object.entries(TIMER_VOICE_NUMBER_WORDS)) {
+    if (heard.includes(`${word} minute`)) return n;
+  }
+  return null;
+}
+
+function startVoiceTimer(minutes) {
+  timerDurationSeconds = minutes * 60;
+  resetTimer();
+  startTimer();
+  byId("timer-presets")
+    ?.querySelectorAll(".timer-preset-btn")
+    .forEach((b) => b.classList.toggle("active", Number(b.dataset.minutes) === minutes));
+}
+
+/** Each entry's test() decides both whether it matches AND whether it's
+ *  currently applicable (e.g. "snooze" only counts while an alarm's
+ *  actually ringing) - a match always runs and always responds, so
+ *  there's never an ambiguous "matched the words but did nothing" gap.
+ *  Checked in order, most specific/urgent first. */
+const VOICE_COMMANDS = [
+  {
+    test: (heard) => isAlarmRinging && /\bsnooze\b/.test(heard),
+    run: () => {
+      snoozeWakeAlarm();
+      return "Snoozed.";
+    },
+  },
+  {
+    test: (heard) => isAlarmRinging && /\b(dismiss|stop|turn off)\b/.test(heard),
+    run: () => {
+      dismissWakeAlarm();
+      return "Alarm dismissed.";
+    },
+  },
+  {
+    test: (heard) => /\bplay\b/.test(heard) && findVoiceSoundId(heard) !== null,
+    run: (heard) => {
+      const soundId = findVoiceSoundId(heard);
+      startLocalPlayback(soundId, 0);
+      recordRecentSound(soundId);
+      saveSoundState();
+      renderSoundMachine();
+      return `Playing ${soundDisplayNameById.get(soundId) || soundId}.`;
+    },
+  },
+  {
+    test: (heard) => /\bstop\b/.test(heard) && /\b(sound|music)\b/.test(heard),
+    run: () => {
+      stopLocalPlaybackFully();
+      saveSoundState();
+      renderSoundMachine();
+      return "Sound off.";
+    },
+  },
+  {
+    test: (heard) => /\btimer\b/.test(heard) && parseVoiceTimerMinutes(heard) !== null,
+    run: (heard) => {
+      const minutes = parseVoiceTimerMinutes(heard);
+      startVoiceTimer(minutes);
+      return `Timer set for ${minutes} minute${minutes === 1 ? "" : "s"}.`;
+    },
+  },
+  {
+    test: (heard) => /\bgood\s*night\b/.test(heard),
+    run: () => {
+      enterBedsideMode();
+      // The Briefing itself IS the response here - a separate "OK" first
+      // would just be redundant, so this returns nothing for the generic
+      // confirmation path below to speak.
+      speakBedtimeBriefing();
+      return null;
+    },
+  },
+  {
+    test: (heard) => /\bwhat('s| is) the time\b|\bwhat time is it\b/.test(heard),
+    run: () => {
+      const shown = byId("clock-time")?.textContent;
+      return shown ? `It's ${shown}.` : null;
+    },
+  },
+  {
+    test: (heard) => /\bweather\b/.test(heard),
+    run: () => {
+      if (!lastWeatherData) return "The weather hasn't loaded yet.";
+      return `${lastWeatherData.condition}, ${displayTemp(lastWeatherData.temperature)} degrees.`;
+    },
+  },
+];
+
+function runVoiceCommand(heard) {
+  for (const command of VOICE_COMMANDS) {
+    if (command.test(heard)) {
+      const confirmation = command.run(heard);
+      if (confirmation) speakText(confirmation);
+      return true;
+    }
+  }
+  return false;
+}
+
+// ---- Continuous listening while an alarm is ringing --------------------
 
 let wakeAlarmRecognition = null;
 
@@ -4717,12 +4855,7 @@ function startAlarmVoiceListening() {
   recognition.lang = "en-US";
 
   recognition.onresult = (event) => {
-    const heard = event.results[event.results.length - 1][0].transcript.toLowerCase();
-    if (heard.includes("snooze")) {
-      snoozeWakeAlarm();
-    } else if (heard.includes("dismiss") || heard.includes("stop") || heard.includes("turn off")) {
-      dismissWakeAlarm();
-    }
+    runVoiceCommand(event.results[event.results.length - 1][0].transcript.toLowerCase());
   };
   // A recognition session commonly ends on its own after a pause in
   // speech, even with continuous:true - restart automatically for as
@@ -4762,6 +4895,57 @@ function stopAlarmVoiceListening() {
   } catch (err) {
     // Already stopped - fine.
   }
+}
+
+// ---- Press-to-talk, available generally ---------------------------------
+// One-shot: starts listening, stops itself after a single result or a few
+// seconds of silence - never sits there listening beyond that single tap,
+// unlike the continuous ringing-alarm listener above.
+
+let voiceCommandRecognition = null;
+
+function startVoiceCommandListening() {
+  const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognitionCtor || voiceCommandRecognition) return;
+
+  const btn = byId("voice-command-btn");
+  btn?.classList.add("listening");
+
+  const recognition = new SpeechRecognitionCtor();
+  recognition.continuous = false;
+  recognition.interimResults = false;
+  recognition.lang = "en-US";
+
+  recognition.onresult = (event) => {
+    const heard = event.results[0][0].transcript.toLowerCase();
+    if (!runVoiceCommand(heard)) speakText("Sorry, I didn't catch that.");
+  };
+  recognition.onend = () => {
+    btn?.classList.remove("listening");
+    voiceCommandRecognition = null;
+  };
+  recognition.onerror = () => {
+    // onend fires right after - the cleanup above already covers it.
+  };
+
+  try {
+    recognition.start();
+  } catch (err) {
+    btn?.classList.remove("listening");
+    return;
+  }
+  voiceCommandRecognition = recognition;
+}
+
+function setupVoiceCommandButton() {
+  const btn = byId("voice-command-btn");
+  const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognitionCtor) {
+    btn?.classList.add("hidden");
+    return;
+  }
+  setIcon("voice-command-icon", "mic");
+  btn?.addEventListener("click", startVoiceCommandListening);
 }
 
 function setupWakeAlarmRingingControls() {
@@ -7712,6 +7896,7 @@ function init() {
   setupBreathingMode();
   setupNightSkyView();
   setupBedtimeBriefing();
+  setupVoiceCommandButton();
   setupDailyQuote();
   setupBackupSettings();
   loadTodayInHistory();
