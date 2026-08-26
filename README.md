@@ -47,19 +47,23 @@ triple-beep that's easy to miss from another room.
 
 ## Features
 
-- **Eight swipeable pages** (CSS scroll-snap, real touch scrolling,
+- **Nine swipeable pages** (CSS scroll-snap, real touch scrolling,
   tap-to-jump dot indicators): a Morning Overview, a Daily Info page, a
-  Clock/Alarm/Sound Machine page, a Wake Alarms page, a Settings page, a
-  Timer/Stopwatch page, a Calculator/Converter page, and a Journal/Word
-  Game page. Bedside Mode, Ambient Mode, and Breathing Mode are summoned
-  full-screen overlays, not pages you swipe to.
+  Clock/Alarm/Sound Machine page, a Wake Alarms page, a Sleep Insights page,
+  a Settings page, a Timer/Stopwatch page, a Calculator/Converter page, and
+  a Journal/Word Game page. Bedside Mode, Ambient Mode, and Breathing Mode
+  are summoned full-screen overlays, not pages you swipe to.
 - **Weather, live from public APIs**: [Open-Meteo](https://open-meteo.com/)
   for current conditions, a 5-day forecast, sunrise/sunset, air quality,
-  and rain probability; the [National Weather Service](https://www.weather.gov/documentation/services-web-api)
+  and rain probability (both a same-day hourly estimate and a 15-minute-
+  resolution near-term nowcast — "Rain starting in ~15 min" — for whichever
+  is more precise); the [National Weather Service](https://www.weather.gov/documentation/services-web-api)
   for severe alerts and the radar station covering this dashboard's fixed
   home coordinate (see `HOME_LATITUDE`/`HOME_LONGITUDE` in `script.js`).
   Both are free, need no API key, and are fetched directly from the
-  browser — no backend in between.
+  browser — no backend in between. When it's actually raining, the Sound
+  Machine card offers a one-tap, once-a-day, dismissible suggestion to
+  play the Rain sound — never auto-plays on its own.
 - **Agenda**: a manually-kept list of upcoming events (add/remove from the
   calendar icon's popover), shown today-only on the Overview card and as a
   full week-ahead glance in that same popover. Not synced from anywhere —
@@ -119,20 +123,27 @@ triple-beep that's easy to miss from another room.
   dedicated full-screen view with a huge centered clock, tomorrow's first
   Agenda item, and the Sound Machine controls, until you tap the exit
   button. Can also enter itself automatically at a scheduled time each night.
-- **Bedtime Briefing**: tap the Goodnight button for a short spoken recap
-  of tomorrow — weather, your first Agenda item, your next alarm — read
-  aloud via the browser's own built-in speech synthesis. No network, no
-  cloud voice service, no API key: the one place this dashboard actually
-  talks back, replacing the one thing an actual Echo Show used to do (via
-  Alexa) that a screen alone otherwise can't.
-- **Night Sky View**: tap "Night Sky" next to the Moon phase (Daily Info
-  page) for which naked-eye planets — Mercury, Venus, Mars, Jupiter,
-  Saturn — plus the Moon are above the horizon right now, and roughly
-  where, as a horizon panorama chart. Computed entirely offline from
-  classical orbital elements (the standard low-precision method used by
-  hobbyist astronomy tools), not fetched from any API — checked against
-  this dashboard's own live sunrise/sunset data during development, and
-  landed within a tenth of a degree of the expected horizon crossing.
+- **Bedtime Briefing** and **Good Morning Briefing**: tap the Goodnight
+  button (hero panel) or the speaker icon next to the Overview's morning
+  briefing card for a short spoken recap — weather, your first Agenda
+  item, your next alarm at night; weather, umbrella/jacket heads-up, and
+  today's first event in the morning — read aloud via the browser's own
+  built-in speech synthesis. No network, no cloud voice service, no API
+  key. (Depends on the kiosk browser's WebView actually implementing
+  `speechSynthesis` — both buttons hide themselves rather than doing
+  nothing if it doesn't.)
+- **Night Sky View, with a real star map**: tap "Night Sky" next to the
+  Moon phase (Daily Info page) for which naked-eye planets — Mercury,
+  Venus, Mars, Jupiter, Saturn — plus the Moon and ~40 of the brightest
+  stars across a dozen recognizable constellations (Big Dipper, Orion,
+  Cassiopeia, Cygnus, and more) are above the horizon right now, drawn as
+  a real connect-the-dots star chart on a horizon panorama. Computed
+  entirely offline from classical orbital elements for the planets (the
+  standard low-precision method used by hobbyist astronomy tools) and
+  fixed catalog coordinates for the stars — nothing fetched from any API.
+  Also flags when a major annual meteor shower is at its peak tonight
+  (e.g. "Perseids peak tonight - up to ~60/hr after midnight"), from a
+  small static almanac of the year's showers.
 - **Ambient Mode**: after a configurable idle timeout with no touch (never
   while Bedside Mode is active), a screensaver-style view takes over —
   huge clock, tiny weather line, dimmed, a twinkling starfield. Any touch
@@ -221,8 +232,11 @@ triple-beep that's easy to miss from another room.
   problems (a passing glance vs. deliberately reading it).
 - **Sticky notes**: short dashboard-only reminders, one at a time
   (cycling if there's more than one), managed from a popover.
-- **Sleep History**: a 7-day chart of how long Bedside Mode ran each
-  night — not sensor-based sleep tracking, just when Bedside Mode was on.
+- **Sleep Insights**: its own dedicated page — a 7-day bar chart, a 30-day
+  trend sparkline, a weekly average, and a night-streak count, all from
+  how long Bedside Mode ran each night (getting in bed to actually
+  dismissing your alarm, not just when the alarm started ringing) — not
+  sensor-based sleep tracking, just when Bedside Mode was genuinely on.
 - **Customizable layout**: the Morning Overview's card order, visibility,
   and size, controlled entirely from the Settings page and saved locally.
 - **Auto-dim at night, brightens in the morning**: the whole display dims
