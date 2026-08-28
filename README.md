@@ -47,13 +47,12 @@ triple-beep that's easy to miss from another room.
 
 ## Features
 
-- **Ten swipeable pages** (CSS scroll-snap, real touch scrolling,
+- **Nine swipeable pages** (CSS scroll-snap, real touch scrolling,
   tap-to-jump dot indicators): a Morning Overview, a Daily Info page, a
   Clock/Alarm/Sound Machine page, a Wake Alarms page, a Sleep Insights page,
-  a Habits page, a Settings page, a Timer/Stopwatch page, a
-  Calculator/Converter page, and a Journal/Word Game/Trivia/Puzzle page.
-  Bedside Mode, Ambient Mode, and Breathing Mode are summoned full-screen
-  overlays, not pages you swipe to.
+  a Habits page, a Settings page, a Timer/Stopwatch page, and a
+  Journal/Word Game/Trivia/Puzzle page. Bedside Mode, Ambient Mode, and
+  Breathing Mode are summoned full-screen overlays, not pages you swipe to.
 - **Weather, live from public APIs**: [Open-Meteo](https://open-meteo.com/)
   for current conditions, a 5-day forecast, sunrise/sunset, air quality,
   and rain probability (both a same-day hourly estimate and a 15-minute-
@@ -66,12 +65,15 @@ triple-beep that's easy to miss from another room.
   Machine card offers a one-tap, once-a-day, dismissible suggestion to
   play the Rain sound — never auto-plays on its own. The same proactive
   nudge pattern also covers UV ("wear sunscreen", High or above), air
-  quality ("air quality is unhealthy", EPA's own Unhealthy threshold), and
-  feels-like temperature ("stay hydrated" / "bundle up") once any of them
-  crosses into genuinely-matters territory — nothing shows for a normal
-  day. The Daily Info page's forecast strip also calls out the single best
-  upcoming day for outdoor plans, scored from condition and how close the
-  high sits to a comfortable range.
+  quality ("air quality is unhealthy", EPA's own Unhealthy threshold),
+  feels-like temperature ("stay hydrated" / "bundle up"), and wind ("secure
+  loose outdoor items", NWS's own Wind Advisory threshold) once any of
+  them crosses into genuinely-matters territory — nothing shows for a
+  normal day. The Daily Info page's forecast strip calls out either the
+  single best window later today for a walk (hour-resolution, from the
+  same precipitation data as the rain nowcast) or, if today itself doesn't
+  have one, the best upcoming day this week — scored from condition and
+  how close the high sits to a comfortable range.
 - **Agenda**: a manually-kept list of upcoming events (add/remove from the
   calendar icon's popover), shown today-only on the Overview card and as a
   full week-ahead glance in that same popover. Not synced from anywhere —
@@ -169,12 +171,6 @@ triple-beep that's easy to miss from another room.
 - **World Clock**: an optional Overview tile (off by default — turn it on
   in Dashboard Layout) showing a short, self-picked list of other cities'
   current time. Pure `Intl`/`localStorage`, no network involved.
-- **Calculator and Unit Converter**: a seventh page, reached the same way as
-  every other page (swipe or tap its dot), toggled between the two with a
-  segmented control. The calculator is a plain left-to-right pocket
-  calculator, not a full expression parser. The converter handles
-  temperature, length, weight, and volume with exact standard conversion
-  constants and a one-tap swap between "from"/"to" units.
 - **Countdown**: an optional Overview tile (off by default — turn it on in
   Dashboard Layout) showing the days remaining until up to a handful of
   self-picked dates, managed from Settings. Purely local — no network,
@@ -195,7 +191,9 @@ triple-beep that's easy to miss from another room.
   calendar icon on each habit opens its History — a month heatmap with
   current streak, best streak ever, and a completion count, navigable
   month to month; adding/removing habits still happens in Settings,
-  linked directly from the new page.
+  linked directly from the new page. Once there's enough history (two
+  weeks' worth of check-ins, combined across every habit), the page also
+  surfaces which day of the week you're actually most consistent on.
 - **Shopping List**: an optional Overview tile for a plain grocery/errand
   list — add and check off items right on the tile itself (no trip to
   Settings needed, unlike Habits/Countdown/Reminders), with checked items

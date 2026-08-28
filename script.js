@@ -137,9 +137,6 @@ const ICONS = {
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5L18 18M18 6l-2.5 2.5M8.5 15.5L6 18"/><circle cx="12" cy="12" r="2.2" fill="currentColor" stroke="none"/></svg>',
   scroll:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21a2 2 0 0 1-2-2V5a2 2 0 0 1 4 0v14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-2H10"/><path d="M6 5a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v10h-4"/></svg>',
-  calculator:
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 6h8"/><circle cx="8" cy="11" r="0.9" fill="currentColor" stroke="none"/><circle cx="12" cy="11" r="0.9" fill="currentColor" stroke="none"/><circle cx="16" cy="11" r="0.9" fill="currentColor" stroke="none"/><circle cx="8" cy="15" r="0.9" fill="currentColor" stroke="none"/><circle cx="12" cy="15" r="0.9" fill="currentColor" stroke="none"/><circle cx="16" cy="15" r="0.9" fill="currentColor" stroke="none"/><circle cx="8" cy="19" r="0.9" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="0.9" fill="currentColor" stroke="none"/><circle cx="16" cy="19" r="0.9" fill="currentColor" stroke="none"/></svg>',
-  swap: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v13M7 4L3 8M7 4l4 4"/><path d="M17 20V7M17 20l4-4M17 20l-4-4"/></svg>',
   checklist:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6l1.5 1.5L7 5"/><path d="M3 12l1.5 1.5L7 11"/><path d="M3 18l1.5 1.5L7 17"/><path d="M11 6h10M11 12h10M11 18h10"/></svg>',
   flame:
@@ -1768,6 +1765,7 @@ function renderWeather(weather) {
     byId("weather-uv")?.classList.add("hidden");
     byId("weather-aqi-nudge")?.classList.add("hidden");
     byId("weather-feelslike-nudge")?.classList.add("hidden");
+    byId("weather-wind-nudge")?.classList.add("hidden");
     setIcon("weather-icon-lg", "cloud");
     setText("weather-temp-lg", "--°");
     setText("weather-condition-lg", "No data");
@@ -1852,6 +1850,14 @@ function renderWeather(weather) {
   setIcon("weather-feelslike-nudge-icon", "alertTriangle");
   setText("weather-feelslike-nudge-text", feelsLikeNudgeText);
   byId("weather-feelslike-nudge")?.classList.toggle("hidden", !feelsLikeNudgeText);
+
+  // Rounds out the environmental-nudge family (rain/UV/AQI/feels-like) -
+  // NWS's own Wind Advisory threshold is 25mph sustained, the same
+  // "borrow the real agency's own line" reasoning as the UV/AQI nudges.
+  const windText = weather.windSpeedMph != null && weather.windSpeedMph >= WIND_NUDGE_THRESHOLD ? `Wind ${weather.windSpeedMph} mph - secure loose outdoor items` : "";
+  setIcon("weather-wind-nudge-icon", "wind");
+  setText("weather-wind-nudge-text", windText);
+  byId("weather-wind-nudge")?.classList.toggle("hidden", !windText);
 
   // A set wallpaper wins outright, same as the accent color following the
   // wallpaper rather than the weather in the original echo-dashboard -
@@ -1962,9 +1968,19 @@ function outdoorScoreForDay(day) {
   return score;
 }
 
-function renderForecastOutlook(days) {
+/** Prefers today's own best walk window (bestWalkWindow, hour-resolution)
+ *  when one exists - genuinely more actionable right now than "some day
+ *  this week" - falling back to the best upcoming day otherwise. */
+function renderForecastOutlook(weather, days) {
   const el = byId("forecast-outlook");
   if (!el) return;
+
+  if (weather.bestWalkWindow) {
+    const { start, end } = weather.bestWalkWindow;
+    el.textContent = `Best time today for a walk: ${formatTimeOfDay(start)}–${formatTimeOfDay(end)}`;
+    el.classList.remove("hidden");
+    return;
+  }
 
   if (days.length < 2) {
     el.classList.add("hidden");
@@ -2017,7 +2033,7 @@ function renderDailyForecast(weather) {
     })
     .join("");
 
-  renderForecastOutlook(days);
+  renderForecastOutlook(weather, days);
 }
 
 const RADAR_REFRESH_INTERVAL_MS = 5 * 60 * 1000; // don't hammer radar.weather.gov every 30s poll
@@ -5424,258 +5440,6 @@ function setupTimerPage() {
 }
 
 // ---------------------------------------------------------------------------
-// Calculator - Utilities page, first segment. Operates left-to-right as
-// each operator is pressed (like a real pocket calculator, not a full
-// expression parser with precedence/parentheses) - that's what everyone
-// actually expects from a physical calculator anyway.
-// ---------------------------------------------------------------------------
-
-let calcDisplayValue = "0";
-let calcPreviousValue = null;
-let calcOperator = null;
-let calcWaitingForOperand = false;
-
-function renderCalculator() {
-  const display = byId("calc-display");
-  if (display) display.textContent = calcDisplayValue;
-}
-
-function calcInputDigit(digit) {
-  if (calcWaitingForOperand) {
-    calcDisplayValue = digit;
-    calcWaitingForOperand = false;
-  } else {
-    calcDisplayValue = calcDisplayValue === "0" ? digit : calcDisplayValue + digit;
-  }
-  renderCalculator();
-}
-
-function calcInputDecimal() {
-  if (calcWaitingForOperand) {
-    calcDisplayValue = "0.";
-    calcWaitingForOperand = false;
-  } else if (!calcDisplayValue.includes(".")) {
-    calcDisplayValue += ".";
-  }
-  renderCalculator();
-}
-
-function calcClear() {
-  calcDisplayValue = "0";
-  calcPreviousValue = null;
-  calcOperator = null;
-  calcWaitingForOperand = false;
-  renderCalculator();
-}
-
-function calcBackspace() {
-  if (calcWaitingForOperand) return;
-  calcDisplayValue = calcDisplayValue.length > 1 ? calcDisplayValue.slice(0, -1) : "0";
-  renderCalculator();
-}
-
-function calcCompute(a, b, operator) {
-  switch (operator) {
-    case "+":
-      return a + b;
-    case "-":
-      return a - b;
-    case "*":
-      return a * b;
-    case "/":
-      return b === 0 ? NaN : a / b;
-    default:
-      return b;
-  }
-}
-
-/** Rounds away the floating-point noise a plain a+b/a*b can leave behind
- *  (0.1 + 0.2 === 0.30000000000000004) before it ever reaches the
- *  display - nobody wants to see that on a calculator. */
-function calcFormatResult(value) {
-  if (Number.isNaN(value) || !Number.isFinite(value)) return "Error";
-  return String(Math.round(value * 1e10) / 1e10);
-}
-
-function calcApplyOperator(nextOperator) {
-  const inputValue = parseFloat(calcDisplayValue);
-
-  if (calcPreviousValue == null) {
-    calcPreviousValue = inputValue;
-  } else if (calcOperator && !calcWaitingForOperand) {
-    calcPreviousValue = calcCompute(calcPreviousValue, inputValue, calcOperator);
-    calcDisplayValue = calcFormatResult(calcPreviousValue);
-  }
-
-  calcWaitingForOperand = true;
-  calcOperator = nextOperator;
-  renderCalculator();
-}
-
-function calcEquals() {
-  if (calcOperator == null || calcPreviousValue == null) return;
-  const inputValue = parseFloat(calcDisplayValue);
-  calcDisplayValue = calcFormatResult(calcCompute(calcPreviousValue, inputValue, calcOperator));
-  calcPreviousValue = null;
-  calcOperator = null;
-  calcWaitingForOperand = true;
-  renderCalculator();
-}
-
-function setupCalculator() {
-  byId("calc-buttons")?.addEventListener("click", (event) => {
-    const btn = event.target.closest("button");
-    if (!btn) return;
-    const { digit, op, action } = btn.dataset;
-    if (digit != null) calcInputDigit(digit);
-    else if (action === "decimal") calcInputDecimal();
-    else if (action === "clear") calcClear();
-    else if (action === "backspace") calcBackspace();
-    else if (action === "equals") calcEquals();
-    else if (op) calcApplyOperator(op);
-  });
-  renderCalculator();
-}
-
-// ---------------------------------------------------------------------------
-// Unit Converter - Utilities page, second segment. Length/Weight/Volume
-// convert through a fixed base unit (meters/kilograms/liters, standard
-// exact international definitions); Temperature is handled separately
-// since it's an affine conversion (an offset, not just a scale factor).
-// ---------------------------------------------------------------------------
-
-const CONVERTER_CATEGORIES = {
-  temperature: {
-    label: "Temperature",
-    units: [
-      { id: "f", label: "°F" },
-      { id: "c", label: "°C" },
-      { id: "k", label: "K" },
-    ],
-  },
-  length: {
-    label: "Length",
-    units: [
-      { id: "in", label: "in" },
-      { id: "ft", label: "ft" },
-      { id: "yd", label: "yd" },
-      { id: "mi", label: "mi" },
-      { id: "cm", label: "cm" },
-      { id: "m", label: "m" },
-      { id: "km", label: "km" },
-    ],
-  },
-  weight: {
-    label: "Weight",
-    units: [
-      { id: "oz", label: "oz" },
-      { id: "lb", label: "lb" },
-      { id: "g", label: "g" },
-      { id: "kg", label: "kg" },
-    ],
-  },
-  volume: {
-    label: "Volume",
-    units: [
-      { id: "floz", label: "fl oz" },
-      { id: "cup", label: "cup" },
-      { id: "gal", label: "gal" },
-      { id: "ml", label: "mL" },
-      { id: "l", label: "L" },
-    ],
-  },
-};
-
-// Meters per unit (exact international definitions).
-const LENGTH_TO_METERS = { in: 0.0254, ft: 0.3048, yd: 0.9144, mi: 1609.344, cm: 0.01, m: 1, km: 1000 };
-// Kilograms per unit (exact international avoirdupois definitions).
-const WEIGHT_TO_KG = { oz: 0.028349523125, lb: 0.45359237, g: 0.001, kg: 1 };
-// Liters per unit (exact US customary definitions).
-const VOLUME_TO_LITERS = { floz: 0.0295735295625, cup: 0.2365882365, gal: 3.785411784, ml: 0.001, l: 1 };
-
-function toCelsius(value, unit) {
-  if (unit === "c") return value;
-  if (unit === "f") return (value - 32) * (5 / 9);
-  return value - 273.15; // k
-}
-
-function fromCelsius(celsius, unit) {
-  if (unit === "c") return celsius;
-  if (unit === "f") return celsius * (9 / 5) + 32;
-  return celsius + 273.15; // k
-}
-
-function convertValue(category, value, fromUnit, toUnit) {
-  if (category === "temperature") return fromCelsius(toCelsius(value, fromUnit), toUnit);
-  const table = category === "length" ? LENGTH_TO_METERS : category === "weight" ? WEIGHT_TO_KG : VOLUME_TO_LITERS;
-  return (value * table[fromUnit]) / table[toUnit];
-}
-
-let converterCategory = "temperature";
-
-function populateConverterUnitPickers() {
-  const category = CONVERTER_CATEGORIES[converterCategory];
-  const optionsHtml = category.units.map((u) => `<option value="${u.id}">${escapeHtml(u.label)}</option>`).join("");
-  const fromPicker = byId("converter-from-unit");
-  const toPicker = byId("converter-to-unit");
-  if (fromPicker) fromPicker.innerHTML = optionsHtml;
-  if (toPicker) toPicker.innerHTML = optionsHtml;
-  // Default from/to to two different units so the first conversion shown
-  // is actually meaningful, not a same-unit no-op.
-  if (toPicker && category.units.length > 1) toPicker.value = category.units[1].id;
-}
-
-function runConverter() {
-  const input = byId("converter-input");
-  const fromUnit = byId("converter-from-unit")?.value;
-  const toUnit = byId("converter-to-unit")?.value;
-  const output = byId("converter-output");
-  if (!input || !fromUnit || !toUnit || !output) return;
-
-  const value = parseFloat(input.value);
-  if (Number.isNaN(value)) {
-    output.textContent = "";
-    return;
-  }
-  output.textContent = String(Math.round(convertValue(converterCategory, value, fromUnit, toUnit) * 10000) / 10000);
-}
-
-function setupConverter() {
-  setIcon("converter-swap-icon", "swap");
-  populateConverterUnitPickers();
-
-  byId("converter-category")?.addEventListener("change", (event) => {
-    converterCategory = event.target.value;
-    populateConverterUnitPickers();
-    runConverter();
-  });
-  byId("converter-input")?.addEventListener("input", runConverter);
-  byId("converter-from-unit")?.addEventListener("change", runConverter);
-  byId("converter-to-unit")?.addEventListener("change", runConverter);
-  byId("converter-swap-btn")?.addEventListener("click", () => {
-    const fromPicker = byId("converter-from-unit");
-    const toPicker = byId("converter-to-unit");
-    if (!fromPicker || !toPicker) return;
-    [fromPicker.value, toPicker.value] = [toPicker.value, fromPicker.value];
-    runConverter();
-  });
-}
-
-function setupUtilitiesPage() {
-  setupCalculator();
-  setupConverter();
-
-  const segmented = byId("utilities-mode-segmented");
-  segmented?.addEventListener("click", (event) => {
-    const btn = event.target.closest(".settings-segment");
-    if (!btn) return;
-    segmented.querySelectorAll(".settings-segment").forEach((b) => b.classList.toggle("active", b === btn));
-    byId("calculator-view")?.classList.toggle("hidden", btn.dataset.mode !== "calculator");
-    byId("converter-view")?.classList.toggle("hidden", btn.dataset.mode !== "converter");
-  });
-}
-
-// ---------------------------------------------------------------------------
 // Countdown - an optional Overview tile (off by default, like World Clock)
 // showing days remaining until one or more self-picked dates. Pure
 // localStorage, no network - re-rendered once per calendar day (see
@@ -6036,6 +5800,42 @@ function habitBestStreak(habitId) {
   return best;
 }
 
+const HABIT_WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+// Below this many total check-ins (across every habit combined), there
+// just isn't enough data yet to claim a real day-of-week pattern rather
+// than noise from the first couple of habits added.
+const HABIT_DAY_INSIGHT_MIN_CHECKINS = 14;
+
+/** Which day of the week has the most check-ins, combined across every
+ *  habit - null if there isn't enough data yet to say anything meaningful
+ *  (see HABIT_DAY_INSIGHT_MIN_CHECKINS). */
+function habitBestDayOfWeek() {
+  const countsByWeekday = new Array(7).fill(0);
+  let total = 0;
+  Object.values(habitLog).forEach((dates) => {
+    dates.forEach((dateKey) => {
+      const [year, month, day] = dateKey.split("-").map(Number);
+      countsByWeekday[new Date(year, month - 1, day).getDay()]++;
+      total++;
+    });
+  });
+  if (total < HABIT_DAY_INSIGHT_MIN_CHECKINS) return null;
+
+  let bestDay = 0;
+  for (let i = 1; i < 7; i++) {
+    if (countsByWeekday[i] > countsByWeekday[bestDay]) bestDay = i;
+  }
+  return HABIT_WEEKDAY_NAMES[bestDay];
+}
+
+function renderHabitDayInsight() {
+  const el = byId("habits-day-insight");
+  if (!el) return;
+  const bestDay = habitBestDayOfWeek();
+  el.textContent = bestDay ? `You're most consistent on ${bestDay}s` : "";
+  el.classList.toggle("hidden", !bestDay);
+}
+
 // A streak crossing one of these gets a one-shot celebratory flourish
 // (see renderHabits() below) rather than a permanently different look -
 // the milestone is the moment it's reached, not an ongoing state.
@@ -6097,6 +5897,7 @@ function renderHabits() {
   setIcon("habits-page-title-icon", "flame");
   renderHabitsInto("habits-list");
   renderHabitsInto("page-habits-list");
+  renderHabitDayInsight();
 }
 
 function renderHabitsSettings() {
@@ -6548,6 +6349,10 @@ const AQI_NUDGE_THRESHOLD = 151;
 const FEELS_LIKE_HOT_THRESHOLD = 100;
 const FEELS_LIKE_COLD_THRESHOLD = 32;
 
+// NWS's own Wind Advisory threshold - sustained wind at or above this is
+// worth a heads-up, not just an arbitrary pick of this dashboard's own.
+const WIND_NUDGE_THRESHOLD = 25;
+
 /** "2026-07-27T06:15" -> "06:15" */
 function extractTimeOfDayIso(isoDateTime) {
   const time = isoDateTime && isoDateTime.split("T")[1];
@@ -6615,6 +6420,60 @@ function findTodayMaxPrecipitationProbability(current, hourly) {
   return max;
 }
 
+// Below this counts as "dry enough" for a walk - a lower bar than
+// RAIN_PROBABILITY_THRESHOLD's own umbrella nudge, since a window doesn't
+// need to be bone-dry to be pleasant, just not likely to get rained on.
+const WALK_WINDOW_RAIN_THRESHOLD = 30;
+// A single dry hour isn't worth naming as a "window" - this is the
+// shortest run that's actually useful to plan around.
+const WALK_WINDOW_MIN_HOURS = 2;
+
+/** {start, end} "HH:mm" strings for the longest consecutive run of dry
+ *  hours from now through the end of today, or null if nothing today
+ *  clears WALK_WINDOW_MIN_HOURS - same today-only bounding as
+ *  findRainExpectedAt(), just looking for the best stretch instead of the
+ *  first threshold crossing. */
+function findBestWalkWindow(current, hourly) {
+  const isoNow = current.time;
+  const today = isoNow.split("T")[0];
+
+  const todayHours = [];
+  for (let i = 0; i < hourly.time.length; i++) {
+    const hour = hourly.time[i];
+    if (!hour.startsWith(today) || hour < isoNow) continue;
+    const probability = hourly.precipitation_probability?.[i];
+    if (probability == null) continue;
+    todayHours.push({ hour, dry: probability < WALK_WINDOW_RAIN_THRESHOLD });
+  }
+
+  let bestStart = -1;
+  let bestLen = 0;
+  let curStart = -1;
+  let curLen = 0;
+  for (let i = 0; i < todayHours.length; i++) {
+    if (todayHours[i].dry) {
+      if (curStart === -1) curStart = i;
+      curLen++;
+      if (curLen > bestLen) {
+        bestLen = curLen;
+        bestStart = curStart;
+      }
+    } else {
+      curStart = -1;
+      curLen = 0;
+    }
+  }
+  if (bestLen < WALK_WINDOW_MIN_HOURS) return null;
+
+  const startTime = extractTimeOfDayIso(todayHours[bestStart].hour);
+  // The last dry hour's own timestamp is its start (e.g. "16:00" means
+  // 4-5pm is dry) - the window's end is one hour past that.
+  const endDate = new Date(`${todayHours[bestStart + bestLen - 1].hour}:00`);
+  endDate.setHours(endDate.getHours() + 1);
+  const endTime = `${String(endDate.getHours()).padStart(2, "0")}:${String(endDate.getMinutes()).padStart(2, "0")}`;
+  return { start: startTime, end: endTime };
+}
+
 async function fetchJson(url, options) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -6666,6 +6525,7 @@ async function fetchOpenMeteoWeather() {
     rainExpectedAt: findRainExpectedAt(response.current, response.hourly || { time: [] }),
     precipitationProbability: findTodayMaxPrecipitationProbability(response.current, response.hourly || { time: [] }),
     rainStartsInMinutes: findRainStartingSoon(response.current, response.minutely_15 || { time: [] }),
+    bestWalkWindow: findBestWalkWindow(response.current, response.hourly || { time: [] }),
     feelsLike: response.current.apparent_temperature != null ? Math.round(response.current.apparent_temperature) : null,
     windSpeedMph: response.current.wind_speed_10m != null ? Math.round(response.current.wind_speed_10m) : null,
     humidityPercent: response.current.relative_humidity_2m ?? null,
@@ -8391,7 +8251,7 @@ function setupWordPuzzle() {
   });
 }
 
-/** Same segmented-toggle wiring as setupUtilitiesPage() - Journal, Word
+/** Same segmented-toggle wiring as setupTimerPage() - Journal, Word
  *  Game, Trivia, and Puzzle share one page, one at a time. */
 function setupExtrasPage() {
   setupJournal();
@@ -8591,7 +8451,6 @@ function init() {
   setupWakeAlarmRingingControls();
   setupSunriseAlarm();
   setupTimerPage();
-  setupUtilitiesPage();
   setupCountdown();
   setupNightRoutine();
   setupHabits();

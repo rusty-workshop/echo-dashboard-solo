@@ -202,6 +202,10 @@
               <span class="icon-slot small" id="weather-feelslike-nudge-icon" aria-hidden="true"></span>
               <span id="weather-feelslike-nudge-text"></span>
             </div>
+            <div class="weather-rain hidden" id="weather-wind-nudge">
+              <span class="icon-slot small" id="weather-wind-nudge-icon" aria-hidden="true"></span>
+              <span id="weather-wind-nudge-text"></span>
+            </div>
           </div>
         </section>
 
@@ -617,6 +621,7 @@
         <span class="icon-slot" id="habits-page-title-icon" aria-hidden="true"></span>
         Habits
       </h2>
+      <div class="habits-day-insight hidden" id="habits-day-insight"></div>
       <div class="habits-list" id="page-habits-list"></div>
       <button class="alarm-action-btn timer-secondary-btn" id="manage-habits-btn" type="button">Add / Manage in Settings</button>
     </section>
@@ -957,71 +962,11 @@
       </div>
     </section>
 
-    <!-- Page 9: Utilities - a plain calculator and a unit converter,
-         genuinely handy on a kiosk display without reaching for a phone.
-         Same segmented-view pattern as the Timer/Stopwatch page. -->
-    <section class="page page-utilities" id="page-utilities" aria-label="Calculator and Converter">
-      <div class="settings-segmented utilities-mode-segmented" id="utilities-mode-segmented" role="radiogroup" aria-label="Calculator or converter">
-        <button class="settings-segment active" type="button" data-mode="calculator">Calculator</button>
-        <button class="settings-segment" type="button" data-mode="converter">Converter</button>
-      </div>
-
-      <div class="calculator-view" id="calculator-view">
-        <div class="calc-display" id="calc-display">0</div>
-        <div class="calc-buttons" id="calc-buttons">
-          <button class="calc-btn calc-btn-fn" type="button" data-action="clear">C</button>
-          <button class="calc-btn calc-btn-fn" type="button" data-action="backspace">⌫</button>
-          <button class="calc-btn calc-btn-op" type="button" data-op="/">÷</button>
-          <button class="calc-btn calc-btn-op" type="button" data-op="*">×</button>
-
-          <button class="calc-btn" type="button" data-digit="7">7</button>
-          <button class="calc-btn" type="button" data-digit="8">8</button>
-          <button class="calc-btn" type="button" data-digit="9">9</button>
-          <button class="calc-btn calc-btn-op" type="button" data-op="-">−</button>
-
-          <button class="calc-btn" type="button" data-digit="4">4</button>
-          <button class="calc-btn" type="button" data-digit="5">5</button>
-          <button class="calc-btn" type="button" data-digit="6">6</button>
-          <button class="calc-btn calc-btn-op" type="button" data-op="+">+</button>
-
-          <button class="calc-btn" type="button" data-digit="1">1</button>
-          <button class="calc-btn" type="button" data-digit="2">2</button>
-          <button class="calc-btn" type="button" data-digit="3">3</button>
-          <button class="calc-btn calc-btn-equals" type="button" data-action="equals">=</button>
-
-          <button class="calc-btn" type="button" data-digit="0">0</button>
-          <button class="calc-btn" type="button" data-action="decimal">.</button>
-        </div>
-      </div>
-
-      <div class="converter-view hidden" id="converter-view">
-        <div class="settings-text-row">
-          <span class="settings-text-label">Category</span>
-          <select class="settings-select" id="converter-category" aria-label="Conversion category">
-            <option value="temperature">Temperature</option>
-            <option value="length">Length</option>
-            <option value="weight">Weight</option>
-            <option value="volume">Volume</option>
-          </select>
-        </div>
-        <div class="converter-row">
-          <input type="number" id="converter-input" class="settings-text-input converter-input" inputmode="decimal" placeholder="0" aria-label="Value to convert" />
-          <select class="sound-select" id="converter-from-unit" aria-label="From unit"></select>
-        </div>
-        <button class="icon-button converter-swap-btn" id="converter-swap-btn" type="button" aria-label="Swap units">
-          <span class="icon-slot" id="converter-swap-icon" aria-hidden="true"></span>
-        </button>
-        <div class="converter-row">
-          <div class="converter-output" id="converter-output"></div>
-          <select class="sound-select" id="converter-to-unit" aria-label="To unit"></select>
-        </div>
-      </div>
-    </section>
-
-    <!-- Page 10: Journal and Word Game - one line to jot down each night
-         (with a callback to whatever was written on this same date last
-         year), and a tiny daily word-scramble puzzle. Same segmented-view
-         pattern as Timer/Stopwatch and Calculator/Converter. -->
+    <!-- Page 9: Journal, Word Game, Trivia, and Puzzle - one line to jot
+         down each night (with a callback to whatever was written on this
+         same date last year), a tiny daily word-scramble puzzle, a daily
+         trivia question, and a daily "odd one out" puzzle. Same
+         segmented-view pattern as Timer/Stopwatch. -->
     <section class="page page-extras" id="page-extras" aria-label="Journal and Word Game">
       <div class="settings-segmented extras-mode-segmented" id="extras-mode-segmented" role="radiogroup" aria-label="Journal, word game, trivia, or puzzle">
         <button class="settings-segment active" type="button" data-mode="journal">Journal</button>
@@ -1099,8 +1044,7 @@
     <button class="page-dot" data-page="5" aria-label="Habits"></button>
     <button class="page-dot" data-page="6" aria-label="Settings"></button>
     <button class="page-dot" data-page="7" aria-label="Timer and Stopwatch"></button>
-    <button class="page-dot" data-page="8" aria-label="Calculator and Converter"></button>
-    <button class="page-dot" data-page="9" aria-label="Journal and Word Game"></button>
+    <button class="page-dot" data-page="8" aria-label="Journal and Word Game"></button>
   </nav>
 
   <!-- Week-ahead glance and Agenda editor, opened from the Agenda card's
