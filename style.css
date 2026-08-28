@@ -819,6 +819,29 @@ body.reading-mode-active .reading-mode-overlay {
   opacity: 0.85;
 }
 
+/* ---- Page 6: Habits ---------------------------------------------------------- */
+
+.page-habits {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(0.4rem, 1vh, 0.7rem);
+}
+
+.habits-page-title {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  margin: 0;
+  font-size: var(--fs-body-lg);
+  font-weight: 600;
+}
+
+.page-habits .habits-list {
+  flex: 1;
+  min-height: 0;
+}
+
 /* The Daily Info page's own copy of the severe alert banner floats the
    same way .overview-banners does on the Overview page, and for the same
    reason - it used to take a real row ahead of .page-body-split, shrinking
@@ -5120,7 +5143,9 @@ body.ambient-active .weather-bg {
 }
 
 .journal-view,
-.wordpuzzle-view {
+.wordpuzzle-view,
+.trivia-view,
+.puzzle-view {
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -5293,6 +5318,65 @@ body.ambient-active .weather-bg {
 .wordpuzzle-row .settings-text-input {
   flex: 1;
   min-width: 0;
+}
+
+.trivia-question {
+  font-size: var(--fs-body-lg);
+  color: var(--text-primary);
+  padding: 0.7em 0.9em;
+  background: var(--surface-elevated);
+  border-radius: var(--radius-md);
+}
+
+.trivia-answer {
+  font-size: var(--fs-body);
+  color: var(--accent);
+  padding: 0.6em 0.9em;
+  background: var(--surface);
+  border-radius: var(--radius-md);
+}
+
+.puzzle-prompt {
+  font-size: var(--fs-body);
+  color: var(--text-secondary);
+  text-align: center;
+}
+
+.puzzle-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6em;
+}
+
+.puzzle-option-btn {
+  padding: 0.9em 0.6em;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition-color), color var(--transition-color);
+}
+
+.puzzle-option-btn.correct {
+  background: var(--accent);
+  color: var(--surface);
+}
+
+.puzzle-option-btn.incorrect {
+  background: var(--surface);
+  color: var(--text-tertiary);
+  text-decoration: line-through;
+}
+
+.puzzle-feedback {
+  min-height: 1.2em;
+  text-align: center;
+  font-size: var(--fs-body);
+  color: var(--text-secondary);
 }
 
 /* ---- Themes ------------------------------------------------------------

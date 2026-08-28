@@ -1171,9 +1171,26 @@ function endSleepSession() {
   renderSleepHistory();
 }
 
-/** Last 7 calendar days, oldest to newest - multiple sessions landing on
- *  the same night (e.g. exited and re-entered Bedside Mode) sum together
- *  rather than only keeping the last one. */
+const SNOOZE_EVENTS_KEY = "aurora-dashboard:snooze-events";
+const SNOOZE_EVENTS_MAX = 200; // generous - only the last-7-days slice ever gets read
+
+let snoozeEvents = [];
+try {
+  snoozeEvents = JSON.parse(localStorage.getItem(SNOOZE_EVENTS_KEY) || "[]");
+} catch (err) {
+  snoozeEvents = [];
+}
+
+function recordSnoozeEvent() {
+  snoozeEvents = [...snoozeEvents, Date.now()].slice(-SNOOZE_EVENTS_MAX);
+  localStorage.setItem(SNOOZE_EVENTS_KEY, JSON.stringify(snoozeEvents));
+}
+
+function snoozeCountThisWeek() {
+  const weekAgo = Date.now() - 7 * 86400000;
+  return snoozeEvents.filter((t) => t > weekAgo).length;
+}
+
 /** Same-night sessions summed together (e.g. exited and re-entered Bedside
  *  Mode) - shared by the 7-day chart, the 30-day trend, and the streak
  *  count below, so all three agree on what "a night" adds up to. */
@@ -1237,6 +1254,7 @@ function renderSleepHistory() {
     : 0;
   setText("sleep-stat-avg", avgMinutes ? `${Math.floor(avgMinutes / 60)}h ${avgMinutes % 60}m` : "–");
   setText("sleep-stat-streak", String(computeSleepStreak(byDate)));
+  setText("sleep-stat-snooze", String(snoozeCountThisWeek()));
 
   renderSleepTrend(byDate);
 }
@@ -1747,6 +1765,7 @@ function renderWeather(weather) {
     setText("weather-high", "--°");
     setText("weather-low", "--°");
     byId("weather-rain")?.classList.add("hidden");
+    byId("weather-uv")?.classList.add("hidden");
     setIcon("weather-icon-lg", "cloud");
     setText("weather-temp-lg", "--°");
     setText("weather-condition-lg", "No data");
@@ -1755,6 +1774,7 @@ function renderWeather(weather) {
     setText("weather-sunrise-lg", "--:--");
     setText("weather-sunset-lg", "--:--");
     byId("weather-rain-lg")?.classList.add("hidden");
+    byId("weather-uv-lg")?.classList.add("hidden");
     return;
   }
 
@@ -1794,6 +1814,19 @@ function renderWeather(weather) {
   setIcon("weather-rain-icon-lg", "rain");
   setText("weather-rain-text-lg", rainText);
   byId("weather-rain-lg")?.classList.toggle("hidden", !rainText);
+
+  // Same idea as the umbrella nudge above, for UV instead of rain - only
+  // surfaced at High or above (EPA/WHO's own "wear sunscreen" threshold
+  // starts at 6), not every time UV data happens to be present, same
+  // "above a might-actually-matter threshold" reasoning as everywhere
+  // else this dashboard nudges rather than just displaying a raw number.
+  const uvText = weather.uvIndex != null && weather.uvIndex >= UV_SUNSCREEN_THRESHOLD ? `UV ${weather.uvIndex} - wear sunscreen` : "";
+  setIcon("weather-uv-icon", "sunny");
+  setText("weather-uv-text", uvText);
+  byId("weather-uv")?.classList.toggle("hidden", !uvText);
+  setIcon("weather-uv-icon-lg", "sunny");
+  setText("weather-uv-text-lg", uvText);
+  byId("weather-uv-lg")?.classList.toggle("hidden", !uvText);
 
   // A set wallpaper wins outright, same as the accent color following the
   // wallpaper rather than the weather in the original echo-dashboard -
@@ -2748,6 +2781,9 @@ const SOUND_LIBRARY = [
   { id: "brownnoise", displayName: "Brown Noise" },
   { id: "rain", displayName: "Rain" },
   { id: "ocean", displayName: "Ocean Waves" },
+  { id: "thunderstorm", displayName: "Thunderstorm" },
+  { id: "fireplace", displayName: "Fireplace" },
+  { id: "fan", displayName: "Fan" },
   { id: "chime", displayName: "Chime" },
 ];
 // Rebuilt whenever customSounds changes (see rebuildSoundDisplayNameMap()
@@ -2823,6 +2859,13 @@ function fillWhiteNoise(data) {
   for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
 }
 
+/** Keeps a layered sample (base noise + an added rumble/pop) within
+ *  AudioBuffer's valid range - Web Audio doesn't clamp this itself, and
+ *  two sources summed can exceed ±1 even though each alone doesn't. */
+function clampSample(value) {
+  return Math.max(-1, Math.min(1, value));
+}
+
 /** A slow, smooth 0..1 oscillation for shaping amplitude over time (rain's
  *  intensity drift, a wave's swell) - periodSeconds is chosen so a whole
  *  number of cycles fits NOISE_BUFFER_SECONDS exactly, so the loop point
@@ -2863,6 +2906,59 @@ function generateNoiseBuffer(soundId) {
         data[i] *= 0.35 + 0.65 * envelopeValue(i, ctx.sampleRate, NOISE_BUFFER_SECONDS);
       }
       break;
+    case "thunderstorm": {
+      // Rain's own shaped-pink-noise base, quieter, plus a handful of
+      // distant rumbles - a leaky integrator over white noise (same idea
+      // as fillBrownNoise, run fresh per rumble so each one decays
+      // independently) rather than a single low tone, so it reads as an
+      // actual rumble instead of a hum. Fixed start times (not random)
+      // so this buffer, once generated, always loops identically.
+      fillPinkNoise(data);
+      for (let i = 0; i < length; i++) {
+        data[i] *= 0.55 + 0.35 * envelopeValue(i, ctx.sampleRate, NOISE_BUFFER_SECONDS / 4);
+      }
+      for (const startSec of [3, 11, 16]) {
+        const startSample = Math.round(startSec * ctx.sampleRate);
+        const rumbleSamples = Math.min(Math.round(2.5 * ctx.sampleRate), length - startSample);
+        let rumbleState = 0;
+        for (let j = 0; j < rumbleSamples; j++) {
+          const white = Math.random() * 2 - 1;
+          rumbleState = (rumbleState + 0.01 * white) / 1.01;
+          const decay = 1 - j / rumbleSamples;
+          data[startSample + j] = clampSample(data[startSample + j] + rumbleState * 1.8 * decay * decay);
+        }
+      }
+      break;
+    }
+    case "fireplace": {
+      // A quiet brown-noise roar as the base, plus sparse short crackle
+      // pops layered on top - each pop is confined well clear of the
+      // buffer's own loop boundary so it never gets cut off mid-decay.
+      fillBrownNoise(data);
+      for (let i = 0; i < length; i++) data[i] *= 0.45;
+      const popSamples = Math.round(0.02 * ctx.sampleRate);
+      for (let c = 0; c < 40; c++) {
+        const startSample = Math.floor(Math.random() * (length - popSamples));
+        const amp = 0.35 + Math.random() * 0.45;
+        for (let j = 0; j < popSamples; j++) {
+          const decay = 1 - j / popSamples;
+          const idx = startSample + j;
+          data[idx] = clampSample(data[idx] + (Math.random() * 2 - 1) * amp * decay);
+        }
+      }
+      break;
+    }
+    case "fan": {
+      // Broadband white noise with a gentle, steady blade-passing wobble -
+      // faster than Ocean Waves' slow swell, more regular than Rain's,
+      // meant to read as a motor rather than weather. 3 cycles/second
+      // divides evenly into NOISE_BUFFER_SECONDS (60 whole cycles).
+      fillWhiteNoise(data);
+      for (let i = 0; i < length; i++) {
+        data[i] *= 0.55 + 0.15 * envelopeValue(i, ctx.sampleRate, NOISE_BUFFER_SECONDS / 60);
+      }
+      break;
+    }
     case "chime": {
       // A repeating short tone rather than shaped noise - urgent and
       // alarm-appropriate, not meant to blend into the background the way
@@ -4887,6 +4983,8 @@ function dismissWakeAlarm() {
 function snoozeWakeAlarm() {
   const minutes = Number(byId("alarm-snooze-duration")?.value || "9");
   snoozeState = { epochMs: Date.now() + minutes * 60_000, soundId: ringingSoundId, label: ringingLabel };
+  recordSnoozeEvent();
+  renderSleepHistory();
   stopWakeAlarmRinging();
 }
 
@@ -5760,10 +5858,13 @@ function habitBestStreak(habitId) {
 // the milestone is the moment it's reached, not an ongoing state.
 const HABIT_MILESTONE_STREAKS = new Set([7, 14, 30, 50, 100, 150, 200, 365]);
 
-function renderHabits() {
-  const list = byId("habits-list");
+/** Shared by the Overview tile's #habits-list and the dedicated Habits
+ *  page's #page-habits-list - same markup, same data, just two places it
+ *  can be visible at once (the tile is optional/off by default; the page
+ *  always shows everything). */
+function renderHabitsInto(listId) {
+  const list = byId(listId);
   if (!list) return;
-  setIcon("habits-title-icon", "flame");
   if (privacyModeActive) {
     list.innerHTML = '<div class="worldclock-empty">Hidden - Privacy Mode is on</div>';
     return;
@@ -5808,6 +5909,13 @@ function renderHabits() {
     .join("");
 }
 
+function renderHabits() {
+  setIcon("habits-title-icon", "flame");
+  setIcon("habits-page-title-icon", "flame");
+  renderHabitsInto("habits-list");
+  renderHabitsInto("page-habits-list");
+}
+
 function renderHabitsSettings() {
   const list = byId("settings-habits-list");
   if (!list) return;
@@ -5831,12 +5939,14 @@ function setupHabits() {
   renderHabits();
   renderHabitsSettings();
 
-  byId("habits-list")?.addEventListener("change", (event) => {
+  const handleHabitToggle = (event) => {
     const checkbox = event.target.closest(".habit-checkbox");
     if (!checkbox) return;
     toggleHabitToday(checkbox.dataset.id);
     renderHabits();
-  });
+  };
+  byId("habits-list")?.addEventListener("change", handleHabitToggle);
+  byId("page-habits-list")?.addEventListener("change", handleHabitToggle);
 
   byId("habits-add-btn")?.addEventListener("click", () => {
     const input = byId("habits-add-label");
@@ -5860,9 +5970,18 @@ function setupHabits() {
     renderHabitsSettings();
   });
 
-  byId("habits-list")?.addEventListener("click", (event) => {
+  const handleHabitHistoryClick = (event) => {
     const historyBtn = event.target.closest(".habit-history-btn");
     if (historyBtn) openHabitHistory(historyBtn.dataset.id);
+  };
+  byId("habits-list")?.addEventListener("click", handleHabitHistoryClick);
+  byId("page-habits-list")?.addEventListener("click", handleHabitHistoryClick);
+
+  byId("see-habits-btn")?.addEventListener("click", () => {
+    byId("page-habits")?.scrollIntoView({ behavior: "smooth", inline: "start", block: "nearest" });
+  });
+  byId("manage-habits-btn")?.addEventListener("click", () => {
+    byId("page-settings")?.scrollIntoView({ behavior: "smooth", inline: "start", block: "nearest" });
   });
 }
 
@@ -6231,6 +6350,11 @@ function wmoCodeToCondition(code) {
 // hourly probabilities are frequently in the 10-30% range for a mostly dry
 // day, and a warning that fires half the time trains you to ignore it.
 const RAIN_PROBABILITY_THRESHOLD = 50;
+
+// The standard EPA/WHO UV Index scale calls 6 the start of "High" - their
+// own threshold for actively recommending sunscreen, not an arbitrary
+// pick of this dashboard's own.
+const UV_SUNSCREEN_THRESHOLD = 6;
 
 /** "2026-07-27T06:15" -> "06:15" */
 function extractTimeOfDayIso(isoDateTime) {
@@ -7401,6 +7525,146 @@ function setupDailyQuote() {
 }
 
 // ---------------------------------------------------------------------------
+// Daily Trivia - same deterministic day-of-year pick as Daily Quote above
+// and the Word Puzzle below, just paired with a question/answer instead of
+// a passive line, on the Extras page. Tap to reveal rather than showing
+// the answer outright, same "don't spoil it before you've had a chance to
+// guess" idea as Word Puzzle's own Reveal button.
+// ---------------------------------------------------------------------------
+
+const TRIVIA_QUESTIONS = [
+  { q: "What's the only mammal capable of true flight?", a: "The bat." },
+  { q: "What planet has the most moons in our solar system?", a: "Saturn." },
+  { q: "In what year did the Berlin Wall fall?", a: "1989." },
+  { q: "What's the smallest country in the world by area?", a: "Vatican City." },
+  { q: "What metal is liquid at room temperature?", a: "Mercury." },
+  { q: "How many bones are in the adult human body?", a: "206." },
+  { q: "What's the longest river in the world?", a: "The Nile." },
+  { q: "Who painted the ceiling of the Sistine Chapel?", a: "Michelangelo." },
+  { q: "What's the hardest natural substance on Earth?", a: "Diamond." },
+  { q: "What was the first country to grant women the right to vote?", a: "New Zealand, in 1893." },
+  { q: "What's the tallest mountain in the world, measured from base to peak?", a: "Mauna Kea (most of it underwater) - Everest is tallest above sea level." },
+  { q: "What language has the most native speakers worldwide?", a: "Mandarin Chinese." },
+  { q: "What's the smallest bone in the human body?", a: "The stapes, in the ear." },
+  { q: "What year did the Titanic sink?", a: "1912." },
+  { q: "What's the largest desert in the world?", a: "Antarctica - deserts are defined by low precipitation, not heat." },
+  { q: "How many hearts does an octopus have?", a: "Three." },
+  { q: "What's the currency of Japan?", a: "The yen." },
+  { q: "Who wrote 'Romeo and Juliet'?", a: "William Shakespeare." },
+  { q: "What's the speed of light, roughly?", a: "About 186,000 miles per second." },
+  { q: "What ocean is the largest?", a: "The Pacific." },
+  { q: "What's the capital of Australia?", a: "Canberra, not Sydney." },
+  { q: "How many strings does a standard violin have?", a: "Four." },
+  { q: "What element has the chemical symbol 'Au'?", a: "Gold." },
+  { q: "What's the world's most spoken second language?", a: "English." },
+  { q: "What year did humans first land on the Moon?", a: "1969." },
+  { q: "What's the largest organ in the human body?", a: "The skin." },
+  { q: "What animal is the fastest on land?", a: "The cheetah." },
+  { q: "How many time zones does Russia span?", a: "Eleven." },
+  { q: "What's the boiling point of water at sea level, in Fahrenheit?", a: "212°F." },
+  { q: "What ancient wonder of the world still stands today?", a: "The Great Pyramid of Giza." },
+];
+
+function renderDailyTrivia() {
+  const trivia = TRIVIA_QUESTIONS[dayOfYear(new Date()) % TRIVIA_QUESTIONS.length];
+  setText("trivia-question", trivia.q);
+  const answerEl = byId("trivia-answer");
+  if (answerEl) {
+    answerEl.textContent = trivia.a;
+    answerEl.classList.add("hidden");
+  }
+  byId("trivia-reveal-btn")?.classList.remove("hidden");
+}
+
+function setupDailyTrivia() {
+  setIcon("trivia-title-icon", "sparkle");
+  renderDailyTrivia();
+  byId("trivia-reveal-btn")?.addEventListener("click", () => {
+    byId("trivia-answer")?.classList.remove("hidden");
+    byId("trivia-reveal-btn")?.classList.add("hidden");
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Daily Puzzle - "Odd One Out": four options, one doesn't share the
+// category the other three do, tap to guess. A genuinely different puzzle
+// shape from Trivia (pattern recognition, not recall) and Word Scramble
+// (a tap choice, not typed text - no on-screen keyboard needed). Same
+// deterministic day-of-year pick as everything else on this page.
+// ---------------------------------------------------------------------------
+
+const PUZZLE_ROUNDS = [
+  { options: ["Apple", "Banana", "Carrot", "Orange"], oddIndex: 2, reason: "Carrot is a vegetable - the rest are fruits." },
+  { options: ["Salmon", "Trout", "Dolphin", "Tuna"], oddIndex: 2, reason: "A dolphin is a mammal - the rest are fish." },
+  { options: ["Square", "Triangle", "Circle", "Sphere"], oddIndex: 3, reason: "A sphere is 3D - the rest are flat shapes." },
+  { options: ["Guitar", "Violin", "Cello", "Flute"], oddIndex: 3, reason: "A flute is a wind instrument - the rest are strings." },
+  { options: ["Spider", "Ant", "Beetle", "Scorpion"], oddIndex: 1, reason: "An ant has six legs (an insect) - the rest have eight." },
+  { options: ["Jupiter", "Mars", "Venus", "Moon"], oddIndex: 3, reason: "The Moon is a moon, not a planet." },
+  { options: ["Oak", "Maple", "Pine", "Fern"], oddIndex: 3, reason: "A fern isn't a tree - the rest are." },
+  { options: ["Paris", "Tokyo", "Sydney", "California"], oddIndex: 3, reason: "California is a state, not a city." },
+  { options: ["Copper", "Iron", "Oxygen", "Silver"], oddIndex: 2, reason: "Oxygen is a gas at room temperature - the rest are metals." },
+  { options: ["Piano", "Xylophone", "Drums", "Trumpet"], oddIndex: 3, reason: "A trumpet isn't percussion - the rest are." },
+  { options: ["Football", "Chess", "Basketball", "Tennis"], oddIndex: 1, reason: "Chess has no ball - the rest are ball sports." },
+  { options: ["Whale", "Dolphin", "Shark", "Seal"], oddIndex: 2, reason: "A shark is a fish - the rest are marine mammals." },
+  { options: ["Red", "Blue", "Yellow", "Green"], oddIndex: 3, reason: "Green is a mixed color - red, blue, and yellow are primary colors." },
+  { options: ["Saturn", "Earth", "Mars", "Pluto"], oddIndex: 3, reason: "Pluto is classified as a dwarf planet, not a full planet." },
+  { options: ["Eagle", "Penguin", "Sparrow", "Robin"], oddIndex: 1, reason: "A penguin can't fly - the rest can." },
+  { options: ["Diamond", "Ruby", "Quartz", "Emerald"], oddIndex: 2, reason: "Quartz isn't typically classed as a precious gemstone - the rest are." },
+  { options: ["2", "3", "9", "5"], oddIndex: 2, reason: "9 is the only one that isn't a prime number." },
+  { options: ["Rome", "Athens", "Cairo", "Berlin"], oddIndex: 2, reason: "Cairo is in Africa - the rest are European capitals." },
+  { options: ["Lion", "Tiger", "Wolf", "Leopard"], oddIndex: 2, reason: "A wolf isn't a big cat - the rest are." },
+  { options: ["Mercury", "Venus", "Saturn", "Mars"], oddIndex: 2, reason: "Saturn has rings visible from Earth - the rest are the closest rocky planets to the Sun." },
+  { options: ["Novel", "Poem", "Essay", "Painting"], oddIndex: 3, reason: "A painting isn't a form of writing - the rest are." },
+  { options: ["Hammer", "Screwdriver", "Wrench", "Nail"], oddIndex: 3, reason: "A nail is a fastener, not a tool that drives one." },
+  { options: ["Frog", "Toad", "Newt", "Lizard"], oddIndex: 3, reason: "A lizard is a reptile - the rest are amphibians." },
+  { options: ["January", "March", "April", "September"], oddIndex: 0, reason: "January has 31 days - the rest have 30." },
+];
+
+let dailyPuzzleAnswered = false;
+
+function renderDailyPuzzle() {
+  const round = PUZZLE_ROUNDS[dayOfYear(new Date()) % PUZZLE_ROUNDS.length];
+  const container = byId("puzzle-options");
+  if (!container) return;
+  dailyPuzzleAnswered = false;
+  container.innerHTML = round.options
+    .map((opt, i) => `<button class="puzzle-option-btn" type="button" data-index="${i}">${escapeHtml(opt)}</button>`)
+    .join("");
+  const feedback = byId("puzzle-feedback");
+  if (feedback) {
+    feedback.textContent = "";
+    feedback.classList.add("hidden");
+  }
+}
+
+function setupDailyPuzzle() {
+  setIcon("puzzle-title-icon", "sparkle");
+  renderDailyPuzzle();
+  byId("puzzle-options")?.addEventListener("click", (event) => {
+    if (dailyPuzzleAnswered) return;
+    const btn = event.target.closest(".puzzle-option-btn");
+    if (!btn) return;
+    dailyPuzzleAnswered = true;
+
+    const round = PUZZLE_ROUNDS[dayOfYear(new Date()) % PUZZLE_ROUNDS.length];
+    const chosenIndex = Number(btn.dataset.index);
+    const correct = chosenIndex === round.oddIndex;
+    byId("puzzle-options")
+      ?.querySelectorAll(".puzzle-option-btn")
+      .forEach((b, i) => {
+        if (i === round.oddIndex) b.classList.add("correct");
+        else if (i === chosenIndex) b.classList.add("incorrect");
+      });
+
+    const feedback = byId("puzzle-feedback");
+    if (feedback) {
+      feedback.textContent = (correct ? "Correct! " : "Not quite. ") + round.reason;
+      feedback.classList.remove("hidden");
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Today in History - Wikipedia's public "on this day" REST API (CORS-
 // enabled, no key needed). Daily Info page only. Graceful "just hide the
 // card" fallback on failure, same resilience philosophy as the weather
@@ -7827,11 +8091,13 @@ function setupWordPuzzle() {
   });
 }
 
-/** Same segmented-toggle wiring as setupUtilitiesPage() - Journal and Word
- *  Game share one page, one at a time. */
+/** Same segmented-toggle wiring as setupUtilitiesPage() - Journal, Word
+ *  Game, Trivia, and Puzzle share one page, one at a time. */
 function setupExtrasPage() {
   setupJournal();
   setupWordPuzzle();
+  setupDailyTrivia();
+  setupDailyPuzzle();
 
   const segmented = byId("extras-mode-segmented");
   segmented?.addEventListener("click", (event) => {
@@ -7840,6 +8106,8 @@ function setupExtrasPage() {
     segmented.querySelectorAll(".settings-segment").forEach((b) => b.classList.toggle("active", b === btn));
     byId("journal-view")?.classList.toggle("hidden", btn.dataset.mode !== "journal");
     byId("wordpuzzle-view")?.classList.toggle("hidden", btn.dataset.mode !== "wordpuzzle");
+    byId("trivia-view")?.classList.toggle("hidden", btn.dataset.mode !== "trivia");
+    byId("puzzle-view")?.classList.toggle("hidden", btn.dataset.mode !== "puzzle");
   });
 }
 

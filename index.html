@@ -189,6 +189,10 @@
               <span class="icon-slot small" id="weather-rain-icon" aria-hidden="true"></span>
               <span id="weather-rain-text"></span>
             </div>
+            <div class="weather-rain hidden" id="weather-uv">
+              <span class="icon-slot small" id="weather-uv-icon" aria-hidden="true"></span>
+              <span id="weather-uv-text"></span>
+            </div>
           </div>
         </section>
 
@@ -353,6 +357,10 @@
           <div class="weather-rain-lg hidden" id="weather-rain-lg">
             <span class="icon-slot small" id="weather-rain-icon-lg" aria-hidden="true"></span>
             <span id="weather-rain-text-lg"></span>
+          </div>
+          <div class="weather-rain-lg hidden" id="weather-uv-lg">
+            <span class="icon-slot small" id="weather-uv-icon-lg" aria-hidden="true"></span>
+            <span id="weather-uv-text-lg"></span>
           </div>
           <div class="weather-aqi-lg hidden" id="weather-aqi-lg">
             <span class="icon-slot small" id="weather-aqi-icon-lg" aria-hidden="true"></span>
@@ -569,6 +577,10 @@
           <span class="sleep-stat-value" id="sleep-stat-streak">–</span>
           <span class="sleep-stat-label">night streak</span>
         </div>
+        <div class="sleep-stat">
+          <span class="sleep-stat-value" id="sleep-stat-snooze">–</span>
+          <span class="sleep-stat-label">snoozed this week</span>
+        </div>
       </div>
 
       <div class="settings-section">
@@ -582,7 +594,24 @@
       </div>
     </section>
 
-    <!-- Page 6: Settings. -->
+    <!-- Page 6: Habits - promotes the Overview tile's habit list (which
+         stays optional/off-by-default there, small) into a real,
+         always-available page. Reuses the exact same renderHabits() output
+         and the existing per-habit month-calendar popover
+         (openHabitHistory()) - nothing new to check off here, just real
+         screen space to see every habit at once regardless of whether the
+         Overview tile is enabled. Adding/removing habits still happens in
+         Settings, linked from here, same as Sleep Insights' own link. -->
+    <section class="page page-habits" id="page-habits" aria-label="Habits">
+      <h2 class="habits-page-title">
+        <span class="icon-slot" id="habits-page-title-icon" aria-hidden="true"></span>
+        Habits
+      </h2>
+      <div class="habits-list" id="page-habits-list"></div>
+      <button class="alarm-action-btn timer-secondary-btn" id="manage-habits-btn" type="button">Add / Manage in Settings</button>
+    </section>
+
+    <!-- Page 7: Settings. -->
     <section class="page page-settings" id="page-settings" aria-label="Settings">
       <div class="settings-section">
         <h2 class="settings-title">Profile</h2>
@@ -656,6 +685,7 @@
           <input type="text" id="habits-add-label" class="settings-text-input" placeholder="Habit…" maxlength="40" autocomplete="off" aria-label="Habit label" />
           <button class="settings-add-btn" type="button" id="habits-add-btn">Add</button>
         </div>
+        <button class="alarm-action-btn timer-secondary-btn" id="see-habits-btn" type="button">See Habits Page</button>
       </div>
 
       <div class="settings-section">
@@ -878,7 +908,7 @@
       </div>
     </section>
 
-    <!-- Page 7: Timer & Stopwatch - deliberately its own page rather than
+    <!-- Page 8: Timer & Stopwatch - deliberately its own page rather than
          squeezed into the already-packed Clock/Sound Machine page, since a
          countdown/stopwatch wants real tap targets and a big readable
          number, not another compressed row. -->
@@ -915,7 +945,7 @@
       </div>
     </section>
 
-    <!-- Page 8: Utilities - a plain calculator and a unit converter,
+    <!-- Page 9: Utilities - a plain calculator and a unit converter,
          genuinely handy on a kiosk display without reaching for a phone.
          Same segmented-view pattern as the Timer/Stopwatch page. -->
     <section class="page page-utilities" id="page-utilities" aria-label="Calculator and Converter">
@@ -976,14 +1006,16 @@
       </div>
     </section>
 
-    <!-- Page 9: Journal and Word Game - one line to jot down each night
+    <!-- Page 10: Journal and Word Game - one line to jot down each night
          (with a callback to whatever was written on this same date last
          year), and a tiny daily word-scramble puzzle. Same segmented-view
          pattern as Timer/Stopwatch and Calculator/Converter. -->
     <section class="page page-extras" id="page-extras" aria-label="Journal and Word Game">
-      <div class="settings-segmented extras-mode-segmented" id="extras-mode-segmented" role="radiogroup" aria-label="Journal or word game">
+      <div class="settings-segmented extras-mode-segmented" id="extras-mode-segmented" role="radiogroup" aria-label="Journal, word game, trivia, or puzzle">
         <button class="settings-segment active" type="button" data-mode="journal">Journal</button>
         <button class="settings-segment" type="button" data-mode="wordpuzzle">Word Game</button>
+        <button class="settings-segment" type="button" data-mode="trivia">Trivia</button>
+        <button class="settings-segment" type="button" data-mode="puzzle">Puzzle</button>
       </div>
 
       <div class="journal-view" id="journal-view">
@@ -1022,6 +1054,26 @@
         </div>
         <button class="settings-add-btn settings-btn-secondary" id="wordpuzzle-reveal-btn" type="button">Reveal</button>
       </div>
+
+      <div class="trivia-view hidden" id="trivia-view">
+        <h2 class="card-title">
+          <span class="icon-slot small" id="trivia-title-icon" aria-hidden="true"></span>
+          Daily Trivia
+        </h2>
+        <div class="trivia-question" id="trivia-question"></div>
+        <div class="trivia-answer hidden" id="trivia-answer"></div>
+        <button class="settings-add-btn settings-btn-secondary" id="trivia-reveal-btn" type="button">Reveal Answer</button>
+      </div>
+
+      <div class="puzzle-view hidden" id="puzzle-view">
+        <h2 class="card-title">
+          <span class="icon-slot small" id="puzzle-title-icon" aria-hidden="true"></span>
+          Odd One Out
+        </h2>
+        <div class="puzzle-prompt">Which one doesn't belong?</div>
+        <div class="puzzle-options" id="puzzle-options"></div>
+        <div class="puzzle-feedback hidden" id="puzzle-feedback"></div>
+      </div>
     </section>
   </div>
 
@@ -1031,10 +1083,11 @@
     <button class="page-dot" data-page="2" aria-label="Clock and Sound Machine"></button>
     <button class="page-dot" data-page="3" aria-label="Wake Alarms"></button>
     <button class="page-dot" data-page="4" aria-label="Sleep Insights"></button>
-    <button class="page-dot" data-page="5" aria-label="Settings"></button>
-    <button class="page-dot" data-page="6" aria-label="Timer and Stopwatch"></button>
-    <button class="page-dot" data-page="7" aria-label="Calculator and Converter"></button>
-    <button class="page-dot" data-page="8" aria-label="Journal and Word Game"></button>
+    <button class="page-dot" data-page="5" aria-label="Habits"></button>
+    <button class="page-dot" data-page="6" aria-label="Settings"></button>
+    <button class="page-dot" data-page="7" aria-label="Timer and Stopwatch"></button>
+    <button class="page-dot" data-page="8" aria-label="Calculator and Converter"></button>
+    <button class="page-dot" data-page="9" aria-label="Journal and Word Game"></button>
   </nav>
 
   <!-- Week-ahead glance and Agenda editor, opened from the Agenda card's

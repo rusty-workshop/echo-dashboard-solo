@@ -47,12 +47,13 @@ triple-beep that's easy to miss from another room.
 
 ## Features
 
-- **Nine swipeable pages** (CSS scroll-snap, real touch scrolling,
+- **Ten swipeable pages** (CSS scroll-snap, real touch scrolling,
   tap-to-jump dot indicators): a Morning Overview, a Daily Info page, a
   Clock/Alarm/Sound Machine page, a Wake Alarms page, a Sleep Insights page,
-  a Settings page, a Timer/Stopwatch page, a Calculator/Converter page, and
-  a Journal/Word Game page. Bedside Mode, Ambient Mode, and Breathing Mode
-  are summoned full-screen overlays, not pages you swipe to.
+  a Habits page, a Settings page, a Timer/Stopwatch page, a
+  Calculator/Converter page, and a Journal/Word Game/Trivia/Puzzle page.
+  Bedside Mode, Ambient Mode, and Breathing Mode are summoned full-screen
+  overlays, not pages you swipe to.
 - **Weather, live from public APIs**: [Open-Meteo](https://open-meteo.com/)
   for current conditions, a 5-day forecast, sunrise/sunset, air quality,
   and rain probability (both a same-day hourly estimate and a 15-minute-
@@ -63,7 +64,8 @@ triple-beep that's easy to miss from another room.
   Both are free, need no API key, and are fetched directly from the
   browser — no backend in between. When it's actually raining, the Sound
   Machine card offers a one-tap, once-a-day, dismissible suggestion to
-  play the Rain sound — never auto-plays on its own.
+  play the Rain sound — never auto-plays on its own. A UV heads-up
+  ("wear sunscreen") shows the same way, only at High or above.
 - **Agenda**: a manually-kept list of upcoming events (add/remove from the
   calendar icon's popover), shown today-only on the Overview card and as a
   full week-ahead glance in that same popover. Not synced from anywhere —
@@ -88,10 +90,11 @@ triple-beep that's easy to miss from another room.
   ramp still only start at the actual alarm time. A "Skip sunrise" button
   cancels just that one occurrence without touching the alarm itself.
 - **Sound Machine**: White Noise, Pink Noise, Brown Noise, Rain, Ocean
-  Waves, and a Chime, every one synthesized on the spot with the Web Audio
-  API and looped gaplessly — no audio files bundled or fetched. Survives a
-  reload (resumes whatever was playing, including an in-progress sleep
-  timer) via `localStorage` instead of a remembered server-side state.
+  Waves, Thunderstorm, Fireplace, Fan, and a Chime, every one synthesized on
+  the spot with the Web Audio API and looped gaplessly — no audio files
+  bundled or fetched. Survives a reload (resumes whatever was playing,
+  including an in-progress sleep timer) via `localStorage` instead of a
+  remembered server-side state.
 - **Soundscape Mixer**: a second Sound Machine mode (segmented alongside
   Single, Clock/Sound page) that blends up to four sounds together at
   once, each with its own volume — rain under a low brown-noise hum,
@@ -171,14 +174,17 @@ triple-beep that's easy to miss from another room.
   resets itself every night, ships with three starter items ("Doors
   locked", "Alarm set for tomorrow", "Phone charging") that can be edited
   or removed entirely from Settings.
-- **Habits**: an optional Overview tile — a few self-defined daily habits
-  with a streak count next to each. Checking a habit off today never
-  breaks an otherwise-intact streak just because it hasn't been checked
-  off *yet* that day. A streak crossing a round number (7, 30, 100...)
-  gets a one-shot celebratory flourish, not a permanently different look.
-  A calendar icon on each habit opens its History — a month heatmap with
+- **Habits**: self-defined daily habits with a streak count next to each,
+  both as an optional (off by default) Overview tile and as a full
+  dedicated page so they're never more than a swipe away regardless of
+  that tile's setting. Checking a habit off today never breaks an
+  otherwise-intact streak just because it hasn't been checked off *yet*
+  that day. A streak crossing a round number (7, 30, 100...) gets a
+  one-shot celebratory flourish, not a permanently different look. A
+  calendar icon on each habit opens its History — a month heatmap with
   current streak, best streak ever, and a completion count, navigable
-  month to month.
+  month to month; adding/removing habits still happens in Settings,
+  linked directly from the new page.
 - **Shopping List**: an optional Overview tile for a plain grocery/errand
   list — add and check off items right on the tile itself (no trip to
   Settings needed, unlike Habits/Countdown/Reminders), with checked items
@@ -198,9 +204,13 @@ triple-beep that's easy to miss from another room.
   dashboard loads; only a SHA-256 hash is ever stored, and this is a
   casual glance-deterrent, not real security, since anyone with direct
   access to this device's files could still read the raw data underneath.
-- **Word Scramble**: a tiny daily word puzzle sharing the Journal's page,
-  deterministically picked and scrambled by date (same seed all day, same
-  word for everyone), for something to solve half-asleep.
+- **Word Scramble, Daily Trivia, and a daily "Odd One Out" puzzle**: three
+  more tiny daily diversions sharing the Journal's page (a four-way
+  segmented view), each deterministically picked by date — same seed all
+  day, same puzzle for everyone. Word Scramble unscrambles a word; Trivia
+  poses a question with a tap-to-reveal answer; Odd One Out shows four
+  options and asks which one doesn't share what the other three have in
+  common, with the reasoning shown either way once you've guessed.
 - **Today in History**: three real historical events for today's date, via
   Wikipedia's public "on this day" feed. Daily Info page only, and simply
   hides itself on a failed fetch rather than showing anything broken —
@@ -233,10 +243,11 @@ triple-beep that's easy to miss from another room.
 - **Sticky notes**: short dashboard-only reminders, one at a time
   (cycling if there's more than one), managed from a popover.
 - **Sleep Insights**: its own dedicated page — a 7-day bar chart, a 30-day
-  trend sparkline, a weekly average, and a night-streak count, all from
-  how long Bedside Mode ran each night (getting in bed to actually
-  dismissing your alarm, not just when the alarm started ringing) — not
-  sensor-based sleep tracking, just when Bedside Mode was genuinely on.
+  trend sparkline, a weekly average, a night-streak count, and how many
+  times you've hit snooze this week, all from how long Bedside Mode ran
+  each night (getting in bed to actually dismissing your alarm, not just
+  when the alarm started ringing) — not sensor-based sleep tracking, just
+  when Bedside Mode was genuinely on.
 - **Customizable layout**: the Morning Overview's card order, visibility,
   and size, controlled entirely from the Settings page and saved locally.
 - **Auto-dim at night, brightens in the morning**: the whole display dims
