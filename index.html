@@ -157,6 +157,7 @@
           <p class="briefing-line" id="briefing-weather"></p>
           <p class="briefing-line" id="briefing-summary"></p>
           <p class="briefing-line briefing-quote" id="briefing-quote"></p>
+          <p class="briefing-line briefing-word" id="briefing-word"></p>
         </div>
 
         <div class="status-line" id="status-line">
@@ -192,6 +193,14 @@
             <div class="weather-rain hidden" id="weather-uv">
               <span class="icon-slot small" id="weather-uv-icon" aria-hidden="true"></span>
               <span id="weather-uv-text"></span>
+            </div>
+            <div class="weather-rain hidden" id="weather-aqi-nudge">
+              <span class="icon-slot small" id="weather-aqi-nudge-icon" aria-hidden="true"></span>
+              <span id="weather-aqi-nudge-text"></span>
+            </div>
+            <div class="weather-rain hidden" id="weather-feelslike-nudge">
+              <span class="icon-slot small" id="weather-feelslike-nudge-icon" aria-hidden="true"></span>
+              <span id="weather-feelslike-nudge-text"></span>
             </div>
           </div>
         </section>
@@ -336,6 +345,7 @@
         <button class="severe-alert-dismiss" id="severe-alert-dismiss-lg" type="button" aria-label="Dismiss alert">&times;</button>
       </div>
       <div class="forecast-strip hidden" id="forecast-strip" aria-label="Daily forecast"></div>
+      <div class="forecast-outlook hidden" id="forecast-outlook"></div>
       <div class="page-body-split">
         <div class="hero-tile">
           <span class="icon-slot xlarge" id="weather-icon-lg" aria-hidden="true"></span>
@@ -927,6 +937,8 @@
           <button class="timer-preset-btn" type="button" data-minutes="15">15m</button>
           <button class="timer-preset-btn" type="button" data-minutes="30">30m</button>
           <button class="timer-preset-btn" type="button" data-minutes="60">60m</button>
+          <span class="timer-custom-presets" id="timer-custom-presets"></span>
+          <button class="timer-preset-add-btn" type="button" id="timer-preset-manage-btn" aria-label="Add or manage custom timer presets">+</button>
         </div>
         <div class="timer-actions">
           <button class="alarm-action-btn" id="timer-start-btn" type="button">Start</button>
@@ -1069,6 +1081,7 @@
         <h2 class="card-title">
           <span class="icon-slot small" id="puzzle-title-icon" aria-hidden="true"></span>
           Odd One Out
+          <span class="puzzle-streak" id="puzzle-streak"></span>
         </h2>
         <div class="puzzle-prompt">Which one doesn't belong?</div>
         <div class="puzzle-options" id="puzzle-options"></div>
@@ -1144,6 +1157,25 @@
     </div>
     <div class="habit-history-weekdays" id="habit-history-weekdays"></div>
     <div class="habit-history-grid" id="habit-history-grid"></div>
+  </div>
+
+  <!-- Custom Timer Presets - named durations (e.g. "Tea - 3 min") beyond
+       the fixed 1/5/10/15/30/60 buttons, appended to the same row on the
+       Timer page (see setupTimerPresets() in script.js). Management (add/
+       remove) lives in this popover, same shape as Habit History above,
+       so the Timer page itself never grows a second control row. -->
+  <div class="week-view-backdrop hidden" id="timer-preset-backdrop"></div>
+  <div class="week-view-popover hidden" id="timer-preset-popover">
+    <div class="sticky-note-editor-header">
+      <span class="sticky-note-editor-title">Custom Timer Presets</span>
+      <button class="sticky-note-editor-close" id="timer-preset-popover-close" type="button" aria-label="Close">&times;</button>
+    </div>
+    <div class="settings-app-list" id="timer-preset-list"></div>
+    <div class="settings-schedule-add-row">
+      <input type="text" id="timer-preset-add-label" class="settings-text-input" placeholder="Label (e.g. Tea)…" maxlength="20" autocomplete="off" aria-label="Preset label" />
+      <input type="number" id="timer-preset-add-minutes" class="settings-text-input timer-preset-minutes-input" placeholder="Min" min="1" max="999" aria-label="Preset minutes" />
+      <button class="settings-add-btn" type="button" id="timer-preset-add-confirm-btn">Add</button>
+    </div>
   </div>
 
   <!-- Sunrise Alarm - a slow, silent color/brightness ramp shown ahead of

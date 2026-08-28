@@ -64,8 +64,14 @@ triple-beep that's easy to miss from another room.
   Both are free, need no API key, and are fetched directly from the
   browser — no backend in between. When it's actually raining, the Sound
   Machine card offers a one-tap, once-a-day, dismissible suggestion to
-  play the Rain sound — never auto-plays on its own. A UV heads-up
-  ("wear sunscreen") shows the same way, only at High or above.
+  play the Rain sound — never auto-plays on its own. The same proactive
+  nudge pattern also covers UV ("wear sunscreen", High or above), air
+  quality ("air quality is unhealthy", EPA's own Unhealthy threshold), and
+  feels-like temperature ("stay hydrated" / "bundle up") once any of them
+  crosses into genuinely-matters territory — nothing shows for a normal
+  day. The Daily Info page's forecast strip also calls out the single best
+  upcoming day for outdoor plans, scored from condition and how close the
+  high sits to a comfortable range.
 - **Agenda**: a manually-kept list of upcoming events (add/remove from the
   calendar icon's popover), shown today-only on the Overview card and as a
   full week-ahead glance in that same popover. Not synced from anywhere —
@@ -89,6 +95,11 @@ triple-beep that's easy to miss from another room.
   gadget. Silent the whole time; the real alarm sound and full-brightness
   ramp still only start at the actual alarm time. A "Skip sunrise" button
   cancels just that one occurrence without touching the alarm itself.
+- **Timer & Stopwatch**, with named custom presets: the fixed
+  1/5/10/15/30/60-minute buttons can be joined by your own named durations
+  ("Tea — 3 min", "Pizza — 12 min") via a "+" button on the same row —
+  added, removed, and persisted from a small popover so the Timer page
+  itself never grows a second row of controls.
 - **Sound Machine**: White Noise, Pink Noise, Brown Noise, Rain, Ocean
   Waves, Thunderstorm, Fireplace, Fan, and a Chime, every one synthesized on
   the spot with the Web Audio API and looped gaplessly — no audio files
@@ -210,7 +221,9 @@ triple-beep that's easy to miss from another room.
   day, same puzzle for everyone. Word Scramble unscrambles a word; Trivia
   poses a question with a tap-to-reveal answer; Odd One Out shows four
   options and asks which one doesn't share what the other three have in
-  common, with the reasoning shown either way once you've guessed.
+  common, with the reasoning shown either way once you've guessed — it
+  also keeps a day-streak of correct guesses, persisted so a reload shows
+  the same result rather than letting today's puzzle be re-answered.
 - **Today in History**: three real historical events for today's date, via
   Wikipedia's public "on this day" feed. Daily Info page only, and simply
   hides itself on a failed fetch rather than showing anything broken —
@@ -218,9 +231,10 @@ triple-beep that's easy to miss from another room.
 - **Moon phase**, rendered as an actual crescent/gibbous shape (not just an
   emoji) via a two-overlapping-circles CSS trick, alongside the existing
   text label — shown on the Daily Info page and in Ambient Mode.
-- **A daily quote**, deterministically picked from a small local list keyed
-  off the day of the year — no network involved, so it's the one line on
-  the dashboard guaranteed to never be blank.
+- **A daily quote and Word of the Day**, both deterministically picked from
+  a small local list keyed off the day of the year — no network involved,
+  so they're the two lines on the dashboard guaranteed to never be blank.
+  The word comes with a short definition and an example sentence.
 - **8 Dashboard Themes** (Material You, Nothing OS, Pixel, Retro CRT, OLED
   Minimal, Catppuccin, Nord, Gruvbox), switchable from the Settings page —
   each swaps palette, typography, shape, and a couple of signature

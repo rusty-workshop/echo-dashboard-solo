@@ -1766,6 +1766,8 @@ function renderWeather(weather) {
     setText("weather-low", "--°");
     byId("weather-rain")?.classList.add("hidden");
     byId("weather-uv")?.classList.add("hidden");
+    byId("weather-aqi-nudge")?.classList.add("hidden");
+    byId("weather-feelslike-nudge")?.classList.add("hidden");
     setIcon("weather-icon-lg", "cloud");
     setText("weather-temp-lg", "--°");
     setText("weather-condition-lg", "No data");
@@ -1827,6 +1829,29 @@ function renderWeather(weather) {
   setIcon("weather-uv-icon-lg", "sunny");
   setText("weather-uv-text-lg", uvText);
   byId("weather-uv-lg")?.classList.toggle("hidden", !uvText);
+
+  // Same nudge pattern again, for air quality - Daily Info's own AQI line
+  // (renderAirQuality()) always shows the number, but this only surfaces
+  // proactively on the Overview card once it actually crosses into EPA's
+  // "Unhealthy" band (151+), where everyone (not just sensitive groups)
+  // may start noticing effects.
+  const aqi = weather.airQualityIndex;
+  const aqiNudgeText = aqi != null && aqi > AQI_NUDGE_THRESHOLD ? `AQI ${aqi} - air quality is unhealthy` : "";
+  setIcon("weather-aqi-nudge-icon", "leaf");
+  setText("weather-aqi-nudge-text", aqiNudgeText);
+  byId("weather-aqi-nudge")?.classList.toggle("hidden", !aqiNudgeText);
+
+  // Only when feels-like diverges into genuinely uncomfortable territory,
+  // not just "a little warmer/cooler than the actual reading" (that's
+  // already covered by the plain feels-like line in renderWeatherDetails).
+  let feelsLikeNudgeText = "";
+  if (weather.feelsLike != null) {
+    if (weather.feelsLike >= FEELS_LIKE_HOT_THRESHOLD) feelsLikeNudgeText = `Feels like ${displayTemp(weather.feelsLike)}° - stay hydrated`;
+    else if (weather.feelsLike <= FEELS_LIKE_COLD_THRESHOLD) feelsLikeNudgeText = `Feels like ${displayTemp(weather.feelsLike)}° - bundle up`;
+  }
+  setIcon("weather-feelslike-nudge-icon", "alertTriangle");
+  setText("weather-feelslike-nudge-text", feelsLikeNudgeText);
+  byId("weather-feelslike-nudge")?.classList.toggle("hidden", !feelsLikeNudgeText);
 
   // A set wallpaper wins outright, same as the accent color following the
   // wallpaper rather than the weather in the original echo-dashboard -
@@ -1907,6 +1932,64 @@ function renderWeatherDetails(weather) {
   el.textContent = parts.join(" · ");
 }
 
+function forecastDayLabel(day, index) {
+  return index === 0 ? "Today" : new Date(`${day.date}T00:00:00`).toLocaleDateString(undefined, { weekday: "long" });
+}
+
+// Condition alone (no per-day rain probability comes back from Open-Meteo's
+// daily block, just a WMO code -> condition string) plus how close the
+// day's high sits to a comfortable range - crude, but "good enough for a
+// glance" is the whole point, same spirit as everything else this
+// dashboard nudges on rather than a precise forecast model.
+const OUTLOOK_GOOD_CONDITIONS = new Set(["Clear", "Partly Cloudy"]);
+const OUTLOOK_COMFORTABLE_LOW = 65;
+const OUTLOOK_COMFORTABLE_HIGH = 80;
+// A day has to clear this to be worth calling out at all - stops a rainy,
+// overcast week from still naming its "least bad" day as if it were good.
+const OUTLOOK_MIN_SCORE = 10;
+
+function outdoorScoreForDay(day) {
+  let score = 0;
+  if (OUTLOOK_GOOD_CONDITIONS.has(day.condition)) score += 10;
+  else if (day.condition === "Overcast" || day.condition === "Fog") score += 3;
+
+  if (day.high >= OUTLOOK_COMFORTABLE_LOW && day.high <= OUTLOOK_COMFORTABLE_HIGH) {
+    score += 5;
+  } else {
+    const distance = day.high < OUTLOOK_COMFORTABLE_LOW ? OUTLOOK_COMFORTABLE_LOW - day.high : day.high - OUTLOOK_COMFORTABLE_HIGH;
+    score += Math.max(0, 5 - distance / 5);
+  }
+  return score;
+}
+
+function renderForecastOutlook(days) {
+  const el = byId("forecast-outlook");
+  if (!el) return;
+
+  if (days.length < 2) {
+    el.classList.add("hidden");
+    return;
+  }
+
+  let bestIndex = 0;
+  let bestScore = outdoorScoreForDay(days[0]);
+  for (let i = 1; i < days.length; i++) {
+    const score = outdoorScoreForDay(days[i]);
+    if (score > bestScore) {
+      bestScore = score;
+      bestIndex = i;
+    }
+  }
+
+  if (bestScore < OUTLOOK_MIN_SCORE) {
+    el.classList.add("hidden");
+    return;
+  }
+
+  el.textContent = `Best day for outdoor plans: ${forecastDayLabel(days[bestIndex], bestIndex)}`;
+  el.classList.remove("hidden");
+}
+
 /** Today plus the next few days (see WeatherConfig.FORECAST_DAYS on the
  *  Aurora side) - Daily Info page only, same reasoning as the radar panel
  *  for why it doesn't also try to fit in the compact Overview card. */
@@ -1917,6 +2000,7 @@ function renderDailyForecast(weather) {
   const days = (weather && weather.dailyForecast) || [];
   if (days.length === 0) {
     strip.classList.add("hidden");
+    byId("forecast-outlook")?.classList.add("hidden");
     return;
   }
 
@@ -1932,6 +2016,8 @@ function renderDailyForecast(weather) {
         </div>`;
     })
     .join("");
+
+  renderForecastOutlook(days);
 }
 
 const RADAR_REFRESH_INTERVAL_MS = 5 * 60 * 1000; // don't hammer radar.weather.gov every 30s poll
@@ -5157,6 +5243,102 @@ function setupTimer() {
   byId("timer-reset-btn")?.addEventListener("click", resetTimer);
 }
 
+// ---------------------------------------------------------------------------
+// Custom Timer Presets - named durations ("Tea - 3 min") beyond the fixed
+// 1/5/10/15/30/60 buttons. Rendered as real .timer-preset-btn elements
+// inside the same #timer-presets row (via #timer-custom-presets, styled
+// display:contents so they're true flex siblings, not nested in a box) -
+// the existing generic click handler in setupTimer() already selects by
+// class and reads data-minutes, so a custom preset needs no special-cased
+// click handling of its own, only rendering. Add/remove management lives
+// in its own popover so the Timer page itself never grows a second row of
+// controls just for that.
+// ---------------------------------------------------------------------------
+
+const TIMER_CUSTOM_PRESETS_KEY = "aurora-dashboard:timer-custom-presets";
+
+function loadCustomTimerPresets() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(TIMER_CUSTOM_PRESETS_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+    return [];
+  }
+}
+
+let customTimerPresets = loadCustomTimerPresets();
+
+function saveCustomTimerPresets() {
+  localStorage.setItem(TIMER_CUSTOM_PRESETS_KEY, JSON.stringify(customTimerPresets));
+}
+
+function renderCustomTimerPresets() {
+  const chips = byId("timer-custom-presets");
+  if (chips) {
+    chips.innerHTML = customTimerPresets
+      .map((preset) => `<button class="timer-preset-btn" type="button" data-minutes="${preset.minutes}">${escapeHtml(preset.label)}</button>`)
+      .join("");
+  }
+
+  const list = byId("timer-preset-list");
+  if (!list) return;
+  if (customTimerPresets.length === 0) {
+    list.innerHTML = '<div class="settings-app-empty">No custom presets yet</div>';
+    return;
+  }
+  list.innerHTML = customTimerPresets
+    .map(
+      (preset, index) => `<div class="settings-app-row" data-index="${index}">
+        <span class="settings-app-label">${escapeHtml(preset.label)} — ${preset.minutes} min</span>
+        <button class="icon-button timer-preset-remove" type="button" aria-label="Remove ${escapeHtml(preset.label)}">
+          <span class="icon-slot small" aria-hidden="true">${ICONS.close}</span>
+        </button>
+      </div>`
+    )
+    .join("");
+}
+
+function openTimerPresetPopover() {
+  byId("timer-preset-popover")?.classList.remove("hidden");
+  byId("timer-preset-backdrop")?.classList.remove("hidden");
+}
+
+function closeTimerPresetPopover() {
+  byId("timer-preset-popover")?.classList.add("hidden");
+  byId("timer-preset-backdrop")?.classList.add("hidden");
+}
+
+function setupTimerPresets() {
+  renderCustomTimerPresets();
+
+  byId("timer-preset-manage-btn")?.addEventListener("click", openTimerPresetPopover);
+  byId("timer-preset-popover-close")?.addEventListener("click", closeTimerPresetPopover);
+  byId("timer-preset-backdrop")?.addEventListener("click", closeTimerPresetPopover);
+
+  byId("timer-preset-add-confirm-btn")?.addEventListener("click", () => {
+    const labelInput = byId("timer-preset-add-label");
+    const minutesInput = byId("timer-preset-add-minutes");
+    const label = labelInput?.value.trim();
+    const minutes = Number(minutesInput?.value);
+    if (!label || !Number.isFinite(minutes) || minutes <= 0) return;
+    customTimerPresets.push({ label, minutes: Math.round(minutes) });
+    saveCustomTimerPresets();
+    renderCustomTimerPresets();
+    if (labelInput) labelInput.value = "";
+    if (minutesInput) minutesInput.value = "";
+  });
+
+  byId("timer-preset-list")?.addEventListener("click", (event) => {
+    const removeBtn = event.target.closest(".timer-preset-remove");
+    if (!removeBtn) return;
+    const index = Number(removeBtn.closest("[data-index]")?.dataset.index);
+    if (Number.isNaN(index)) return;
+    customTimerPresets.splice(index, 1);
+    saveCustomTimerPresets();
+    renderCustomTimerPresets();
+  });
+}
+
 let stopwatchElapsedMs = 0;
 let stopwatchStartedAt = null;
 let stopwatchHandle = null;
@@ -5228,6 +5410,7 @@ function setupStopwatch() {
 
 function setupTimerPage() {
   setupTimer();
+  setupTimerPresets();
   setupStopwatch();
 
   const segmented = byId("timer-mode-segmented");
@@ -6355,6 +6538,15 @@ const RAIN_PROBABILITY_THRESHOLD = 50;
 // own threshold for actively recommending sunscreen, not an arbitrary
 // pick of this dashboard's own.
 const UV_SUNSCREEN_THRESHOLD = 6;
+
+// EPA's own US AQI breakpoint for "Unhealthy" (everyone, not just
+// sensitive groups) starts at 151 - see aqiCategory().
+const AQI_NUDGE_THRESHOLD = 151;
+
+// Raw Fahrenheit thresholds for the feels-like nudge - genuinely
+// uncomfortable territory, not just "a couple degrees off actual."
+const FEELS_LIKE_HOT_THRESHOLD = 100;
+const FEELS_LIKE_COLD_THRESHOLD = 32;
 
 /** "2026-07-27T06:15" -> "06:15" */
 function extractTimeOfDayIso(isoDateTime) {
@@ -7525,6 +7717,50 @@ function setupDailyQuote() {
 }
 
 // ---------------------------------------------------------------------------
+// Word of the Day - same deterministic day-of-year pick as Daily Quote,
+// shown right alongside it. A short vocabulary word, its definition, and
+// one example sentence, kept together on one line since the Overview's
+// briefing area has no room to spare.
+// ---------------------------------------------------------------------------
+
+const WORD_OF_THE_DAY_LIST = [
+  { word: "Ephemeral", def: "lasting for a very short time", example: "The morning fog was ephemeral, gone within the hour." },
+  { word: "Serendipity", def: "a pleasant surprise found by chance", example: "Finding that old photo was pure serendipity." },
+  { word: "Ubiquitous", def: "present everywhere at once", example: "Smartphones have become ubiquitous." },
+  { word: "Resilient", def: "able to recover quickly from difficulty", example: "The old oak proved resilient after the storm." },
+  { word: "Meticulous", def: "showing great care and precision", example: "She kept meticulous notes on every plant." },
+  { word: "Candid", def: "truthful and straightforward", example: "He gave a candid answer, even though it stung." },
+  { word: "Eloquent", def: "fluent and persuasive in speaking or writing", example: "Her eloquent toast brought the room to tears." },
+  { word: "Tenacious", def: "persistent, not easily giving up", example: "The tenacious vine climbed the whole fence by August." },
+  { word: "Whimsical", def: "playfully quaint or fanciful", example: "The garden had a whimsical little gate shaped like a moon." },
+  { word: "Diligent", def: "showing careful, persistent effort", example: "A diligent student rereads the hard parts twice." },
+  { word: "Placid", def: "calm and peaceful, without disturbance", example: "The lake was placid at dawn, not a ripple in sight." },
+  { word: "Verbose", def: "using more words than needed", example: "The report was verbose; half the words could go." },
+  { word: "Prudent", def: "acting with care and good judgment", example: "It was prudent to check the weather before the hike." },
+  { word: "Nostalgic", def: "sentimentally longing for the past", example: "The song made her nostalgic for summers as a kid." },
+  { word: "Astute", def: "sharp-minded and perceptive", example: "His astute question caught something everyone else missed." },
+  { word: "Genuine", def: "authentic, not fake or pretended", example: "His surprise at the party was completely genuine." },
+  { word: "Lucid", def: "clear and easy to understand", example: "She gave a lucid explanation of a tricky topic." },
+  { word: "Solitude", def: "the state of being alone, often peacefully", example: "He treasured an hour of solitude before the house woke up." },
+  { word: "Amiable", def: "friendly and good-natured", example: "The new neighbor was amiable from the first hello." },
+  { word: "Fortitude", def: "courage and strength in facing hardship", example: "She faced the diagnosis with quiet fortitude." },
+  { word: "Meander", def: "to wander slowly, without a fixed path", example: "The trail meanders along the creek for a mile." },
+  { word: "Ponder", def: "to think about something carefully", example: "He paused on the porch to ponder the question." },
+  { word: "Innate", def: "existing from birth, not learned", example: "Curiosity seemed innate in the puppy from day one." },
+  { word: "Concise", def: "brief but complete", example: "Her concise summary said in two lines what took him a page." },
+  { word: "Wistful", def: "full of vague or regretful longing", example: "He looked wistful, watching the last of the fireflies." },
+];
+
+function renderWordOfTheDay() {
+  const entry = WORD_OF_THE_DAY_LIST[dayOfYear(new Date()) % WORD_OF_THE_DAY_LIST.length];
+  setText("briefing-word", `${entry.word}: ${entry.def}. "${entry.example}"`);
+}
+
+function setupWordOfTheDay() {
+  renderWordOfTheDay();
+}
+
+// ---------------------------------------------------------------------------
 // Daily Trivia - same deterministic day-of-year pick as Daily Quote above
 // and the Word Puzzle below, just paired with a question/answer instead of
 // a passive line, on the Extras page. Tap to reveal rather than showing
@@ -7622,6 +7858,67 @@ const PUZZLE_ROUNDS = [
 
 let dailyPuzzleAnswered = false;
 
+// Persisted so the streak survives reloads and so re-visiting today's
+// already-answered puzzle shows the result again instead of letting a
+// second guess quietly overwrite it. Keyed by date rather than just a
+// running counter so a day skipped entirely (dashboard off, or never
+// opened this tab) correctly breaks the streak instead of being invisible.
+const PUZZLE_RESULTS_KEY = "aurora-dashboard:puzzle-results";
+const PUZZLE_RESULTS_MAX = 60;
+
+let puzzleResults = [];
+try {
+  puzzleResults = JSON.parse(localStorage.getItem(PUZZLE_RESULTS_KEY) || "[]");
+} catch (err) {
+  puzzleResults = [];
+}
+
+function savePuzzleResult(correct) {
+  const todayKey = localDateKey(new Date());
+  puzzleResults = [...puzzleResults.filter((r) => r.date !== todayKey), { date: todayKey, correct }].slice(-PUZZLE_RESULTS_MAX);
+  localStorage.setItem(PUZZLE_RESULTS_KEY, JSON.stringify(puzzleResults));
+}
+
+function todaysPuzzleResult() {
+  return puzzleResults.find((r) => r.date === localDateKey(new Date())) || null;
+}
+
+/** Consecutive days answered correctly, walking backward from today - same
+ *  "don't break the streak just because today hasn't been played yet"
+ *  reasoning as habitStreak() and computeSleepStreak(). */
+function puzzleGuessStreak() {
+  const byDate = new Map(puzzleResults.map((r) => [r.date, r.correct]));
+  const dateKeyForOffset = (i) => localDateKey(new Date(Date.now() - i * 86400000));
+  let streak = 0;
+  let offset = byDate.has(dateKeyForOffset(0)) ? 0 : 1;
+  while (byDate.get(dateKeyForOffset(offset)) === true) {
+    streak++;
+    offset++;
+  }
+  return streak;
+}
+
+function renderPuzzleStreak() {
+  const streak = puzzleGuessStreak();
+  setText("puzzle-streak", streak > 0 ? `${streak}-day streak` : "");
+}
+
+function showPuzzleResult(round, chosenIndex, correct) {
+  dailyPuzzleAnswered = true;
+  byId("puzzle-options")
+    ?.querySelectorAll(".puzzle-option-btn")
+    .forEach((b, i) => {
+      if (i === round.oddIndex) b.classList.add("correct");
+      else if (i === chosenIndex) b.classList.add("incorrect");
+    });
+
+  const feedback = byId("puzzle-feedback");
+  if (feedback) {
+    feedback.textContent = (correct ? "Correct! " : "Not quite. ") + round.reason;
+    feedback.classList.remove("hidden");
+  }
+}
+
 function renderDailyPuzzle() {
   const round = PUZZLE_ROUNDS[dayOfYear(new Date()) % PUZZLE_ROUNDS.length];
   const container = byId("puzzle-options");
@@ -7635,6 +7932,19 @@ function renderDailyPuzzle() {
     feedback.textContent = "";
     feedback.classList.add("hidden");
   }
+  renderPuzzleStreak();
+
+  // Already played today (e.g. a reload) - show the same result again
+  // rather than letting it be guessed a second time.
+  const todaysResult = todaysPuzzleResult();
+  if (todaysResult) {
+    // The correct option's index is deterministic from the date, but which
+    // option was actually chosen isn't recorded - only whether it was
+    // right. A wrong guess just highlights the correct answer without
+    // marking any option "incorrect" on reload, which is a fine trade for
+    // not needing to persist the chosen index too.
+    showPuzzleResult(round, todaysResult.correct ? round.oddIndex : -1, todaysResult.correct);
+  }
 }
 
 function setupDailyPuzzle() {
@@ -7644,23 +7954,13 @@ function setupDailyPuzzle() {
     if (dailyPuzzleAnswered) return;
     const btn = event.target.closest(".puzzle-option-btn");
     if (!btn) return;
-    dailyPuzzleAnswered = true;
 
     const round = PUZZLE_ROUNDS[dayOfYear(new Date()) % PUZZLE_ROUNDS.length];
     const chosenIndex = Number(btn.dataset.index);
     const correct = chosenIndex === round.oddIndex;
-    byId("puzzle-options")
-      ?.querySelectorAll(".puzzle-option-btn")
-      .forEach((b, i) => {
-        if (i === round.oddIndex) b.classList.add("correct");
-        else if (i === chosenIndex) b.classList.add("incorrect");
-      });
-
-    const feedback = byId("puzzle-feedback");
-    if (feedback) {
-      feedback.textContent = (correct ? "Correct! " : "Not quite. ") + round.reason;
-      feedback.classList.remove("hidden");
-    }
+    showPuzzleResult(round, chosenIndex, correct);
+    savePuzzleResult(correct);
+    renderPuzzleStreak();
   });
 }
 
@@ -8327,6 +8627,7 @@ function init() {
   setupRainSoundHint();
   setupSleepInsightsPage();
   setupDailyQuote();
+  setupWordOfTheDay();
   setupBackupSettings();
   loadTodayInHistory();
 

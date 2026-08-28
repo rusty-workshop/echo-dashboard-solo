@@ -1426,6 +1426,13 @@ body.reading-mode-active .reading-mode-overlay {
   box-shadow: var(--shadow);
 }
 
+.forecast-outlook {
+  margin-top: 0.3em;
+  font-size: var(--fs-caption);
+  color: var(--accent);
+  text-align: center;
+}
+
 .forecast-day {
   flex: 1;
   min-width: 0;
@@ -2740,6 +2747,30 @@ body.reading-mode-active .reading-mode-overlay {
 .timer-preset-btn.active {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+/* display:contents - these buttons are true flex siblings of the fixed
+   presets inside #timer-presets, not nested in their own box, so wrapping
+   and spacing behave identically whether a preset is built-in or custom. */
+.timer-custom-presets {
+  display: contents;
+}
+
+.timer-preset-add-btn {
+  background: var(--surface-elevated);
+  border: 2px dashed var(--text-tertiary);
+  border-radius: var(--radius-md);
+  padding: 0.5em 0.9em;
+  font-family: inherit;
+  font-size: var(--fs-body);
+  font-weight: 700;
+  color: var(--text-tertiary);
+  cursor: pointer;
+}
+
+.timer-preset-minutes-input {
+  max-width: 5rem;
+  flex: none;
 }
 
 .timer-actions {
@@ -4322,6 +4353,13 @@ body.ambient-active .weather-bg {
   font-style: italic;
 }
 
+.briefing-word {
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ---- World Clock ------------------------------------------------------
    An optional Overview tile (off by default - see DEFAULT_TILE_LAYOUT in
    script.js) plus its Settings-page management list. Pure localStorage/
@@ -5377,6 +5415,13 @@ body.ambient-active .weather-bg {
   text-align: center;
   font-size: var(--fs-body);
   color: var(--text-secondary);
+}
+
+.puzzle-streak {
+  margin-left: auto;
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  color: var(--accent);
 }
 
 /* ---- Themes ------------------------------------------------------------
