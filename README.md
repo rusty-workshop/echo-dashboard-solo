@@ -159,7 +159,11 @@ triple-beep that's easy to miss from another room.
   fixed catalog coordinates for the stars — nothing fetched from any API.
   Also flags when a major annual meteor shower is at its peak tonight
   (e.g. "Perseids peak tonight - up to ~60/hr after midnight"), from a
-  small static almanac of the year's showers.
+  small static almanac of the year's showers, and — the first real
+  connection between the weather layer and the astronomy layer — a
+  one-line stargazing forecast ("Clear skies tonight" / "Cloudy skies
+  tonight") that only speaks up for unambiguous conditions, staying quiet
+  rather than guessing on a partly-cloudy night.
 - **Ambient Mode**: after a configurable idle timeout with no touch (never
   while Bedside Mode is active), a screensaver-style view takes over —
   huge clock, tiny weather line, dimmed, a twinkling starfield. Any touch
@@ -259,7 +263,11 @@ triple-beep that's easy to miss from another room.
   times you've hit snooze this week, all from how long Bedside Mode ran
   each night (getting in bed to actually dismissing your alarm, not just
   when the alarm started ringing) — not sensor-based sleep tracking, just
-  when Bedside Mode was genuinely on.
+  when Bedside Mode was genuinely on. A settable sleep goal (Settings →
+  Sleep Insights, default 8 hours) shows how many nights this week
+  actually met it, and — once there's enough recorded bedtimes — a
+  bedtime-consistency line shows how many nights landed within 30 minutes
+  of your own median bedtime that week.
 - **Customizable layout**: the Morning Overview's card order, visibility,
   and size, controlled entirely from the Settings page and saved locally.
 - **Auto-dim at night, brightens in the morning**: the whole display dims

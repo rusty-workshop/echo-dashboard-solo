@@ -597,6 +597,9 @@
         </div>
       </div>
 
+      <div class="sleep-insight hidden" id="sleep-goal-insight"></div>
+      <div class="sleep-insight hidden" id="sleep-bedtime-insight"></div>
+
       <div class="settings-section">
         <h2 class="settings-title">Last 7 Days</h2>
         <div class="sleep-history-chart" id="sleep-history-chart"></div>
@@ -854,6 +857,10 @@
       <div class="settings-section">
         <h2 class="settings-title">Sleep Insights</h2>
         <div class="settings-text-hint">How long Bedside Mode ran each night, plus a 30-day trend and streak.</div>
+        <div class="settings-text-row">
+          <span class="settings-text-label">Sleep goal (hours)</span>
+          <input type="number" id="sleep-goal-hours-input" class="settings-text-input sleep-goal-input" min="1" max="14" step="0.5" aria-label="Target hours of sleep per night" />
+        </div>
         <button class="alarm-action-btn timer-secondary-btn" id="see-sleep-insights-btn" type="button">See Sleep Insights</button>
       </div>
 
@@ -1261,6 +1268,7 @@
       <span class="moon-visual" id="moon-visual-nightsky" aria-hidden="true"></span>
       <span id="night-sky-moon-label"></span>
     </div>
+    <div class="night-sky-stargazing hidden" id="night-sky-stargazing"></div>
     <div class="night-sky-meteor-hint hidden" id="night-sky-meteor-hint"></div>
     <div class="night-sky-chart-wrap">
       <svg class="night-sky-chart" id="night-sky-chart" viewBox="0 0 360 150" preserveAspectRatio="xMidYMid meet" aria-hidden="true"></svg>

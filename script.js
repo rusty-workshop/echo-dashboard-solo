@@ -1159,8 +1159,14 @@ function endSleepSession() {
   if (!sleepSessionStartAt) return;
   const durationMinutes = Math.round((Date.now() - sleepSessionStartAt) / 60000);
   if (durationMinutes >= 1) {
-    const dateKey = new Date(sleepSessionStartAt).toLocaleDateString("en-CA", { timeZone: currentTimezone || undefined });
-    sleepSessions = [...sleepSessions, { date: dateKey, durationMinutes }].slice(-SLEEP_SESSIONS_MAX);
+    const timeZone = currentTimezone || undefined;
+    const startDate = new Date(sleepSessionStartAt);
+    const dateKey = startDate.toLocaleDateString("en-CA", { timeZone });
+    // "HH:mm" clock time the session started - only used by
+    // bedtimeConsistencyStat() below; older sessions recorded before this
+    // field existed just won't have one, which that function already skips.
+    const startTime = startDate.toLocaleTimeString("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+    sleepSessions = [...sleepSessions, { date: dateKey, durationMinutes, startTime }].slice(-SLEEP_SESSIONS_MAX);
     localStorage.setItem(SLEEP_SESSIONS_KEY, JSON.stringify(sleepSessions));
   }
   sleepSessionStartAt = null;
@@ -1216,6 +1222,77 @@ function computeSleepStreak(byDate) {
   return streak;
 }
 
+const SLEEP_GOAL_HOURS_KEY = "aurora-dashboard:sleep-goal-hours";
+const SLEEP_GOAL_HOURS_DEFAULT = 8;
+
+function loadSleepGoalHours() {
+  const stored = Number(localStorage.getItem(SLEEP_GOAL_HOURS_KEY));
+  return stored > 0 ? stored : SLEEP_GOAL_HOURS_DEFAULT;
+}
+
+function renderSleepGoalInsight(days) {
+  const el = byId("sleep-goal-insight");
+  if (!el) return;
+
+  const goalMinutes = loadSleepGoalHours() * 60;
+  const nightsWithData = days.filter((d) => d.minutes > 0);
+  if (nightsWithData.length === 0) {
+    el.classList.add("hidden");
+    return;
+  }
+  const metCount = nightsWithData.filter((d) => d.minutes >= goalMinutes).length;
+  el.textContent = `${metCount}/${nightsWithData.length} nights met your ${loadSleepGoalHours()}hr goal this week`;
+  el.classList.remove("hidden");
+}
+
+// Bedtimes cluster in the evening/night, but can land on either side of
+// midnight - shifting anything before noon a day forward keeps them on
+// one continuous number line for averaging, rather than midnight
+// wraparound corrupting the median (e.g. 11:50pm and 12:10am should
+// average to ~midnight, not noon).
+function bedtimeMinutesSinceReference(hhmm) {
+  const [hour, minute] = hhmm.split(":").map(Number);
+  let minutes = hour * 60 + minute;
+  if (minutes < 12 * 60) minutes += 24 * 60;
+  return minutes;
+}
+
+function median(numbers) {
+  const sorted = [...numbers].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+const BEDTIME_CONSISTENCY_WINDOW_MINUTES = 30;
+// Fewer than this many recorded bedtimes this week and "your usual
+// bedtime" isn't a meaningful concept yet - older sessions logged before
+// startTime existed don't count toward this either.
+const BEDTIME_CONSISTENCY_MIN_SESSIONS = 3;
+
+function bedtimeConsistencyStat() {
+  const timeZone = currentTimezone || undefined;
+  const weekAgoKey = new Date(Date.now() - 7 * 86400000).toLocaleDateString("en-CA", { timeZone });
+  const recentWithStartTime = sleepSessions.filter((s) => s.startTime && s.date >= weekAgoKey);
+  if (recentWithStartTime.length < BEDTIME_CONSISTENCY_MIN_SESSIONS) return null;
+
+  const minutesList = recentWithStartTime.map((s) => bedtimeMinutesSinceReference(s.startTime));
+  const usual = median(minutesList);
+  const withinWindow = minutesList.filter((m) => Math.abs(m - usual) <= BEDTIME_CONSISTENCY_WINDOW_MINUTES).length;
+  return { withinWindow, total: recentWithStartTime.length };
+}
+
+function renderBedtimeConsistencyInsight() {
+  const el = byId("sleep-bedtime-insight");
+  if (!el) return;
+  const stat = bedtimeConsistencyStat();
+  if (!stat) {
+    el.classList.add("hidden");
+    return;
+  }
+  el.textContent = `${stat.withinWindow}/${stat.total} nights within 30 min of your usual bedtime`;
+  el.classList.remove("hidden");
+}
+
 /** Last 7 calendar days, oldest to newest. */
 function renderSleepHistory() {
   const chart = byId("sleep-history-chart");
@@ -1252,6 +1329,8 @@ function renderSleepHistory() {
   setText("sleep-stat-avg", avgMinutes ? `${Math.floor(avgMinutes / 60)}h ${avgMinutes % 60}m` : "–");
   setText("sleep-stat-streak", String(computeSleepStreak(byDate)));
   setText("sleep-stat-snooze", String(snoozeCountThisWeek()));
+  renderSleepGoalInsight(days);
+  renderBedtimeConsistencyInsight();
 
   renderSleepTrend(byDate);
 }
@@ -1289,6 +1368,20 @@ function setupSleepInsightsPage() {
   byId("see-sleep-insights-btn")?.addEventListener("click", () => {
     byId("page-sleep")?.scrollIntoView({ behavior: "smooth", inline: "start", block: "nearest" });
   });
+
+  const goalInput = byId("sleep-goal-hours-input");
+  if (goalInput) {
+    goalInput.value = String(loadSleepGoalHours());
+    goalInput.addEventListener("change", () => {
+      const hours = Number(goalInput.value);
+      if (hours > 0) {
+        localStorage.setItem(SLEEP_GOAL_HOURS_KEY, String(hours));
+      } else {
+        goalInput.value = String(loadSleepGoalHours());
+      }
+      renderSleepHistory();
+    });
+  }
 }
 
 
@@ -7486,10 +7579,30 @@ function activeMeteorShower(date) {
   });
 }
 
+// First real integration between the weather layer and the astronomy
+// layer - previously entirely separate systems. Only speaks up for
+// unambiguous conditions (properly Clear, or properly cloudy/precipitating)
+// - Partly Cloudy and unrecognized codes stay silent rather than guessing.
+const STARGAZING_POOR_CONDITIONS = new Set(["Overcast", "Fog", "Drizzle", "Rain", "Snow", "Rain Showers", "Snow Showers", "Thunderstorm"]);
+
+function stargazingForecastText(weather) {
+  if (!weather?.condition) return "";
+  if (weather.condition === "Clear") return "Clear skies tonight - good for stargazing.";
+  if (STARGAZING_POOR_CONDITIONS.has(weather.condition)) return "Cloudy skies tonight - stars may not be visible.";
+  return "";
+}
+
 function renderNightSkyView() {
   const now = new Date();
   renderMoonPhaseVisual("moon-visual-nightsky", now);
   setText("night-sky-moon-label", moonPhaseLabel(now));
+
+  const stargazingText = stargazingForecastText(lastWeatherData);
+  const stargazingEl = byId("night-sky-stargazing");
+  if (stargazingEl) {
+    stargazingEl.textContent = stargazingText;
+    stargazingEl.classList.toggle("hidden", !stargazingText);
+  }
 
   const shower = activeMeteorShower(now);
   const hint = byId("night-sky-meteor-hint");

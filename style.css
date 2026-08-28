@@ -777,6 +777,17 @@ body.reading-mode-active .reading-mode-overlay {
   gap: 1rem;
 }
 
+.sleep-insight {
+  flex: none;
+  font-size: var(--fs-caption);
+  color: var(--accent);
+  text-align: center;
+}
+
+.sleep-goal-input {
+  max-width: 5rem;
+}
+
 .sleep-stat {
   flex: 1;
   display: flex;
@@ -4628,6 +4639,12 @@ body.ambient-active .weather-bg {
 .night-sky-meteor-hint {
   font-size: var(--fs-caption);
   color: #ffd873;
+  text-align: center;
+}
+
+.night-sky-stargazing {
+  font-size: var(--fs-caption);
+  color: rgba(232, 236, 245, 0.7);
   text-align: center;
 }
 
