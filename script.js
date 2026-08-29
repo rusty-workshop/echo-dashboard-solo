@@ -2654,23 +2654,30 @@ async function companionServerReachable() {
 }
 
 let activeCompanionAudio = null;
-// Nonzero while a companion-server TTS fetch is in flight - activeCompanionAudio
-// alone isn't enough to detect "already speaking" during that window, since it
-// only gets set once the (network + synthesis) round trip finishes, which is
-// slow enough for a real double-tap to land inside it.
+// Whichever button currently shows .speaking, if any - covers the whole
+// span from tap to either cancel or natural completion, across both the
+// fetch-in-flight window and playback. This, not the `btn` parameter of
+// whichever speakBriefingText() call happens to be running, is the source
+// of truth for which button a cancel should affect: Bedtime and Morning
+// Briefing share this same speaking state (only one can talk at a time),
+// so tapping Morning while Bedtime is mid-sentence needs to silence
+// Bedtime's button, not silently no-op on a button that was never
+// speaking - using the tapped button there previously left the *other*
+// button's icon pulsing forever, since nothing else would ever clear it.
+let activeSpeakingBtn = null;
+// Discriminates a stale in-flight fetch's result after a cancel/restart -
+// see the requestId check below.
 let companionTtsRequestId = 0;
 
 function isBriefingSpeaking() {
-  if (companionTtsRequestId !== 0) return true;
-  if (activeCompanionAudio && !activeCompanionAudio.paused) return true;
-  return typeof window.speechSynthesis !== "undefined" && window.speechSynthesis.speaking;
+  return activeSpeakingBtn !== null;
 }
 
 /** Speaks text via the companion server's TTS if configured and reachable,
  *  falling back to window.speechSynthesis, falling back to doing nothing.
  *  A second call while already speaking - including mid-fetch, before any
- *  audio exists yet - stops it, same "tap again to cancel" idea the buttons
- *  had before this was generalized. */
+ *  audio exists yet, and regardless of which of the two briefing buttons
+ *  is tapped - stops whichever one is actually speaking. */
 async function speakBriefingText(text, btn) {
   if (isBriefingSpeaking()) {
     companionTtsRequestId = 0; // invalidates any in-flight fetch's result, see below
@@ -2680,13 +2687,15 @@ async function speakBriefingText(text, btn) {
       activeCompanionAudio = null;
     }
     if (typeof window.speechSynthesis !== "undefined") window.speechSynthesis.cancel();
-    btn?.classList.remove("speaking");
+    activeSpeakingBtn?.classList.remove("speaking");
+    activeSpeakingBtn = null;
     return;
   }
 
   const config = companionServerConfig();
   if (config) {
     const requestId = ++companionTtsRequestId;
+    activeSpeakingBtn = btn;
     btn?.classList.add("speaking");
     const resp = await companionFetch("/tts", {
       method: "POST",
@@ -2696,7 +2705,8 @@ async function speakBriefingText(text, btn) {
     });
     if (companionTtsRequestId !== requestId) {
       // Cancelled (or superseded by a newer request) while this one was
-      // still in flight - discard the result, don't touch the button.
+      // still in flight - the cancel branch above already cleared the
+      // button, discard this result.
       return;
     }
     companionTtsRequestId = 0;
@@ -2705,24 +2715,45 @@ async function speakBriefingText(text, btn) {
       const audioUrl = URL.createObjectURL(blob);
       const audio = new Audio(audioUrl);
       activeCompanionAudio = audio;
+      // Safety net: if 'ended'/'error' ever fails to fire for some reason
+      // (a media-stack quirk on this specific embedded WebView, an audio
+      // element that silently stalls, etc.), don't leave the icon pulsing
+      // forever - briefings are always well under this, so it only ever
+      // fires as a fallback.
+      const safetyTimeoutId = setTimeout(() => {
+        if (activeCompanionAudio !== audio) return;
+        btn?.classList.remove("speaking");
+        activeCompanionAudio = null;
+        if (activeSpeakingBtn === btn) activeSpeakingBtn = null;
+      }, 30000);
       audio.onended = audio.onerror = () => {
+        clearTimeout(safetyTimeoutId);
         btn?.classList.remove("speaking");
         URL.revokeObjectURL(audioUrl);
         if (activeCompanionAudio === audio) activeCompanionAudio = null;
+        if (activeSpeakingBtn === btn) activeSpeakingBtn = null;
       };
       audio.play();
       return;
     }
     btn?.classList.remove("speaking");
+    activeSpeakingBtn = null;
     // Falls through to speechSynthesis below if the server call failed.
   }
 
   if (typeof window.speechSynthesis === "undefined") return;
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.rate = 0.95;
+  activeSpeakingBtn = btn;
   utterance.onstart = () => btn?.classList.add("speaking");
-  utterance.onend = () => btn?.classList.remove("speaking");
-  utterance.onerror = () => btn?.classList.remove("speaking");
+  utterance.onend = () => {
+    btn?.classList.remove("speaking");
+    if (activeSpeakingBtn === btn) activeSpeakingBtn = null;
+  };
+  utterance.onerror = () => {
+    btn?.classList.remove("speaking");
+    if (activeSpeakingBtn === btn) activeSpeakingBtn = null;
+  };
   window.speechSynthesis.speak(utterance);
 }
 
@@ -2828,7 +2859,9 @@ function setupMorningBriefing() {
     btn?.classList.add("hidden");
     return;
   }
-  setIcon("morning-briefing-icon", "speaker");
+  // Sun rather than speaker - both buttons play audio, so sharing one icon
+  // made them visually indistinguishable sitting right next to each other.
+  setIcon("morning-briefing-icon", "sunny");
   btn?.addEventListener("click", speakMorningBriefing);
 }
 
