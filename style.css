@@ -232,6 +232,12 @@ input {
      background is showing. */
   background: rgba(0, 0, 0, 0.52);
   border-radius: var(--radius-lg);
+  /* The box's bottom edge landed exactly flush with .status-line's own
+     text bottom (zero margin to spare) - fine in the numbers, but on the
+     real device it read as not quite covering "Weather updated..." A
+     little breathing room below fixes that without pushing the panel
+     meaningfully taller. */
+  padding-bottom: 0.35em;
 }
 
 /* A real row in the flex column now, not position:absolute over the
@@ -4452,10 +4458,21 @@ body.ambient-active .weather-bg {
 
 /* Companion Server's generated one-liner - same quiet/italic treatment as
    the quote above it, since it's also texture rather than a hard fact. */
+/* Clamped for the same reason .briefing-word is (see its own comment) -
+   found on-device: .hero-panel's background is bound to its CSS Grid row
+   height (stretched to match the card column, not hero-panel's own
+   content - grid-template-rows: 1fr on its container), so when a longer
+   generated insight sentence wrapped to 3 lines, the actual content grew
+   taller than the box and the last line(s) - down to .status-line -
+   rendered outside the dark background instead of under it. */
 .briefing-insight {
   margin-top: 0.3em;
   color: var(--text-tertiary);
   font-style: italic;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 /* ---- World Clock ------------------------------------------------------
