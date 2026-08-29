@@ -6822,7 +6822,16 @@ function setupPager() {
 
   const pages = Array.from(pager.children);
 
+  // Tracked so leaving the Extras page (Journal/Word Game/Trivia/Puzzle)
+  // can auto-lock the Journal behind it - see lockJournal(). Only fires on
+  // an actual page change, not the initial setActivePage(0) call below.
+  let previousPageId = null;
   const setActivePage = (index) => {
+    const newPageId = pages[index]?.id;
+    if (previousPageId === "page-extras" && newPageId !== "page-extras") {
+      lockJournal();
+    }
+    previousPageId = newPageId;
     dots.forEach((dot, i) => dot.classList.toggle("active", i === index));
   };
   setActivePage(0);
@@ -8015,6 +8024,16 @@ function formatJournalDate(dateKey) {
 
 function isJournalLocked() {
   return !!journalPasswordHash && !journalUnlocked;
+}
+
+/** Called when swiping away from the Extras page (see setupPager()) - a
+ *  password-protected Journal that stays unlocked for the rest of the
+ *  kiosk session the moment you glance away isn't really a deterrent.
+ *  No-ops if there's no password set, or it's already locked. */
+function lockJournal() {
+  if (!journalPasswordHash || !journalUnlocked) return;
+  journalUnlocked = false;
+  renderJournal();
 }
 
 function renderJournal() {
