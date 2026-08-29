@@ -1,26 +1,66 @@
 #!/usr/bin/env python3
 """Companion LAN server for echo-dashboard-solo.
 
-Provides four opt-in endpoints backing features the dashboard can't do
-fully offline/on-device:
+Provides opt-in endpoints backing features the dashboard can't do fully
+offline/on-device:
 
-  GET  /health          - liveness check, no auth
-  POST /tts              body: {"text": "..."}          -> audio/wav
-  POST /insight           body: {weather, sleep, habits, calendar} -> {"text": "..."}
+  GET  /health            - liveness check, no auth
+  POST /tts                 body: {"text": "..."}          -> audio/wav
+  POST /insight              body: {weather, sleep, habits, calendar,
+                                     sleepHistory?, habitCompletionByDate?}
+                             -> {"text": "..."}
   GET  /iss-passes?lat=&lon=&hours=  -> {"passes": [...]}
-  POST /backup            body: arbitrary JSON snapshot  -> {"ok": true}
-  GET  /backup/latest    -> most recent snapshot JSON, or 404
+  POST /backup               body: arbitrary JSON snapshot  -> {"ok": true}
+  GET  /backup/latest       -> most recent snapshot JSON, or 404
+  POST /trivia               body: {} -> {"q": "...", "a": "..."}
+  POST /puzzle                body: {} -> {"options": [...4], "oddIndex": N,
+                                            "reason": "..."}
+  POST /journal-reflection   body: {"entries": [{"date","text"}, ...]}
+                             -> {"text": "..."}
+  POST /heartbeat            body: {} -> {"ok": true} - records a liveness
+                             timestamp; see heartbeat_check.py for the
+                             separate systemd-timer job that alerts on a
+                             missed check-in
+  GET  /wallpaper/random    -> image/jpeg, a random processed photo from
+                               wallpapers/processed/ (fed by dropping files
+                               into wallpapers/inbox/ - see server/README.md)
+  POST /meal-idea             body: {"items": [...shopping list labels]}
+                             -> {"text": "..."}
+  GET  /discord-inbox       -> {"items": [{"type","text","receivedAt"}, ...]}
+                               - fed by discord_bot.py (see server/README.md);
+                               consumes (clears) the queue on each read, so
+                               only ever returns what arrived since the last
+                               poll
 
-Everything is stdlib-only except skyfield (for ISS pass prediction) and the
-Piper TTS binary (piper/piper/piper) + a voice model under piper/voices/,
-downloaded separately - see the deploy notes in this repo's server/README.md.
-No accounts, no TLS - this is meant to sit on a trusted home LAN behind the
-router, with an optional shared-secret header (DASHBOARD_SERVER_KEY) as
-cheap insurance.
+Everything is stdlib-only except skyfield (ISS passes), Pillow (wallpaper
+processing), the Piper TTS binary (piper/piper/piper) + a voice model
+under piper/voices/, and discord.py (discord_bot.py, a separate always-on
+process - see server/README.md). No accounts, no TLS - this is meant to
+sit on a trusted home LAN behind the router, with an optional
+shared-secret header (DASHBOARD_SERVER_KEY) as cheap insurance.
+
+The Ollama-backed endpoints (/insight, /trivia, /journal-reflection) run
+on a small local model (llama3.2:1b by default - see server/README.md for
+why). That model is fine for warm, subjective text like a daily insight
+sentence, but /trivia asks it to produce actual facts, which a 1B model
+can and sometimes will get wrong. Its output is validated for shape (both
+fields present) before being returned, never for factual correctness -
+treat it as a fun supplement, not an authoritative source.
+
+/puzzle ("odd one out" generation) is a harder compositional task - hold
+4 items and a category relationship in mind at once - that the 1B model
+failed constantly (its named "odd" word frequently didn't even match one
+of the 4 it had just generated). It runs on qwen2.5:3b-instruct instead
+(OLLAMA_PUZZLE_MODEL), which got this right reliably in testing; slower
+per call (a few seconds to ~15s including a model-swap reload) but that's
+fine for something the dashboard generates once per day and caches.
 """
+import hashlib
 import json
 import math
 import os
+import random
+import re
 import subprocess
 import time
 import urllib.request
@@ -41,6 +81,13 @@ PORT = int(os.environ.get("DASHBOARD_SERVER_PORT", "8420"))
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 OLLAMA_MODEL = os.environ.get("DASHBOARD_OLLAMA_MODEL", "llama3.2:1b")
+# Odd-one-out puzzle generation needs to actually hold 4 items + a category
+# relationship in mind at once - llama3.2:1b failed this constantly (its
+# named "odd" word frequently didn't even match one of the 4 it had just
+# generated). qwen2.5:3b-instruct got it right 3/3 in testing, ~3-15s per
+# generation - fine for something cached once/day, not fine for anything
+# tap-and-wait like TTS or the daily insight, which stay on the 1B model.
+OLLAMA_PUZZLE_MODEL = os.environ.get("DASHBOARD_PUZZLE_MODEL", "qwen2.5:3b-instruct")
 
 PIPER_BIN = BASE / "piper" / "piper" / "piper"
 PIPER_MODEL = Path(
@@ -52,6 +99,22 @@ TLE_CACHE_FILE = DATA_DIR / "iss_tle.txt"
 TLE_MAX_AGE_SECONDS = 6 * 3600
 
 BACKUP_MAX_AGE_DAYS = 90
+
+HEARTBEAT_FILE = DATA_DIR / "last_heartbeat"
+
+HISTORICAL_WEATHER_CACHE_FILE = DATA_DIR / "historical_weather_cache.json"
+HISTORICAL_WEATHER_YEARS_BACK = 5
+
+DISCORD_INBOX_FILE = DATA_DIR / "discord_inbox.json"
+
+WALLPAPER_DIR = BASE / "wallpapers"
+WALLPAPER_INBOX_DIR = WALLPAPER_DIR / "inbox"
+WALLPAPER_PROCESSED_DIR = WALLPAPER_DIR / "processed"
+WALLPAPER_MANIFEST_FILE = WALLPAPER_DIR / "processed_hashes.json"
+WALLPAPER_MAX_DIMENSION = 1600  # matches the dashboard's own WALLPAPER_MAX_DIMENSION in script.js
+WALLPAPER_JPEG_QUALITY = 82
+for _d in (WALLPAPER_DIR, WALLPAPER_INBOX_DIR, WALLPAPER_PROCESSED_DIR):
+    _d.mkdir(exist_ok=True)
 
 # ---------------------------------------------------------------------------
 # ISS pass prediction (skyfield, no planetary ephemeris needed - only a
@@ -159,8 +222,137 @@ def find_iss_passes(lat, lon, hours):
 
 
 # ---------------------------------------------------------------------------
-# Dynamic insight (local Ollama)
+# Ollama - shared call helper, used by /insight, /trivia, /puzzle, and
+# /journal-reflection below.
 # ---------------------------------------------------------------------------
+
+def call_ollama(prompt, num_predict=60, temperature=0.6, timeout=45, model=None):
+    body = json.dumps(
+        {
+            "model": model or OLLAMA_MODEL,
+            "prompt": prompt,
+            "stream": False,
+            "options": {"temperature": temperature, "num_predict": num_predict},
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        OLLAMA_URL, data=body, headers={"Content-Type": "application/json"}
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        result = json.loads(resp.read().decode("utf-8"))
+    return result.get("response", "").strip()
+
+
+def parse_field(text, label):
+    """Small models are far more reliable at following a simple 'LABEL:
+    value' line format (extremely common in their training data) than
+    producing well-formed nested JSON - see generate_trivia()/
+    generate_puzzle() below, which both hit real malformed-JSON output
+    (a stray extra '{', a wrong nesting depth) before switching to this."""
+    match = re.search(rf"^{label}:\s*(.+)$", text, re.MULTILINE | re.IGNORECASE)
+    return match.group(1).strip() if match else None
+
+
+# ---------------------------------------------------------------------------
+# Dynamic insight - one generated sentence from today's facts, optionally
+# enriched with a real statistical trend computed here (not by the model -
+# small local models are unreliable at arithmetic/correlation, so this is
+# plain Python statistics.mean over data the client sends, folded into the
+# prompt as one more fact for the model to write a sentence about).
+# ---------------------------------------------------------------------------
+
+def compute_trend_fact(sleep_history, habit_completion_by_date):
+    """sleep_history: [{"date": "YYYY-MM-DD", "minutes": N}, ...]
+    habit_completion_by_date: [{"date": "YYYY-MM-DD", "completed": bool}, ...]
+    Compares average sleep duration on nights that followed a day with at
+    least one habit completed vs. nights that didn't - only returned if
+    both groups have a decent sample size, so a handful of data points
+    can't produce a misleading "trend"."""
+    if not sleep_history or not habit_completion_by_date:
+        return None
+
+    completed_dates = {h["date"] for h in habit_completion_by_date if h.get("completed")}
+    incomplete_dates = {h["date"] for h in habit_completion_by_date if not h.get("completed")}
+
+    def prior_date(date_str):
+        from datetime import date, timedelta
+
+        y, m, d = (int(x) for x in date_str.split("-"))
+        return (date(y, m, d) - timedelta(days=1)).isoformat()
+
+    after_completed = [s["minutes"] for s in sleep_history if prior_date(s["date"]) in completed_dates]
+    after_incomplete = [s["minutes"] for s in sleep_history if prior_date(s["date"]) in incomplete_dates]
+
+    if len(after_completed) < 5 or len(after_incomplete) < 5:
+        return None
+
+    import statistics
+
+    avg_completed = statistics.mean(after_completed)
+    avg_incomplete = statistics.mean(after_incomplete)
+    diff_minutes = round(avg_completed - avg_incomplete)
+    if abs(diff_minutes) < 10:
+        return None  # not a meaningfully different amount either way
+
+    direction = "more" if diff_minutes > 0 else "less"
+    return f"across recent history, sleeps {abs(diff_minutes)} minutes {direction} on nights following a day with a habit completed"
+
+
+def load_historical_weather_cache():
+    if HISTORICAL_WEATHER_CACHE_FILE.exists():
+        try:
+            return json.loads(HISTORICAL_WEATHER_CACHE_FILE.read_text())
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def historical_high_average(lat, lon):
+    """Average high temperature (Fahrenheit) for this exact calendar date
+    across the past HISTORICAL_WEATHER_YEARS_BACK years, via Open-Meteo's
+    free archive API (same provider the dashboard already uses for live
+    weather, keyless). Cached to disk once per day per rounded lat/lon,
+    since it's HISTORICAL_WEATHER_YEARS_BACK separate HTTP calls - not
+    something to redo on every /insight request."""
+    today = datetime.now()
+    cache_key = f"{round(lat, 1)},{round(lon, 1)},{today.month:02d}-{today.day:02d}"
+    cache = load_historical_weather_cache()
+    entry = cache.get(cache_key)
+    if entry and entry.get("cachedDate") == today.date().isoformat():
+        return entry.get("average")
+
+    highs = []
+    for years_ago in range(1, HISTORICAL_WEATHER_YEARS_BACK + 1):
+        year = today.year - years_ago
+        date_str = f"{year}-{today.month:02d}-{today.day:02d}"
+        url = (
+            "https://archive-api.open-meteo.com/v1/archive"
+            f"?latitude={lat}&longitude={lon}&start_date={date_str}&end_date={date_str}"
+            "&daily=temperature_2m_max&temperature_unit=fahrenheit&timezone=auto"
+        )
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "echo-dashboard-solo"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            values = data.get("daily", {}).get("temperature_2m_max", [])
+            if values and values[0] is not None:
+                highs.append(values[0])
+        except Exception:
+            continue  # one missing year doesn't sink the whole average
+
+    if len(highs) < 3:  # too few years fetched successfully to trust an average
+        return None
+
+    import statistics
+
+    average = round(statistics.mean(highs), 1)
+    cache[cache_key] = {"cachedDate": today.date().isoformat(), "average": average}
+    # Keep the cache from growing forever - only today's key (across
+    # whatever lat/lon rounds to) is ever relevant again.
+    cache = {k: v for k, v in cache.items() if v.get("cachedDate") == today.date().isoformat()}
+    HISTORICAL_WEATHER_CACHE_FILE.write_text(json.dumps(cache))
+    return average
+
 
 def generate_insight(payload):
     parts = []
@@ -176,6 +368,25 @@ def generate_insight(payload):
     calendar = payload.get("calendar")
     if calendar:
         parts.append(f"next event: {calendar}")
+
+    trend = compute_trend_fact(payload.get("sleepHistory") or [], payload.get("habitCompletionByDate") or [])
+    if trend:
+        parts.append(f"longer-term trend: {trend}")
+
+    lat, lon, today_high = payload.get("lat"), payload.get("lon"), payload.get("todayHigh")
+    if isinstance(lat, (int, float)) and isinstance(lon, (int, float)) and isinstance(today_high, (int, float)):
+        try:
+            avg = historical_high_average(lat, lon)
+        except Exception:
+            avg = None
+        if avg is not None:
+            diff = round(today_high - avg)
+            if abs(diff) >= 5:  # a few degrees off "normal" isn't interesting enough to mention
+                direction = "above" if diff > 0 else "below"
+                parts.append(
+                    f"today's high is {abs(diff)}°F {direction} the {HISTORICAL_WEATHER_YEARS_BACK}-year average for this date"
+                )
+
     facts = "; ".join(parts) if parts else "no data available"
 
     prompt = (
@@ -185,27 +396,230 @@ def generate_insight(payload):
         f"itself.\n\nFacts: {facts}\n\nSentence:"
     )
 
-    body = json.dumps(
-        {
-            "model": OLLAMA_MODEL,
-            "prompt": prompt,
-            "stream": False,
-            "options": {"temperature": 0.6, "num_predict": 60},
-        }
-    ).encode("utf-8")
-
-    req = urllib.request.Request(
-        OLLAMA_URL, data=body, headers={"Content-Type": "application/json"}
-    )
-    with urllib.request.urlopen(req, timeout=45) as resp:
-        result = json.loads(resp.read().decode("utf-8"))
-
-    text = result.get("response", "").strip()
+    text = call_ollama(prompt, num_predict=60, temperature=0.6)
     text = text.strip("\"'").split("\n")[0].strip()
     if len(text) > 220:
         cut = text[:220].rsplit(" ", 1)[0]
         text = cut + "..."
     return text
+
+
+# ---------------------------------------------------------------------------
+# Fresh trivia/puzzle content - the dashboard's own TRIVIA_QUESTIONS/
+# PUZZLE_ROUNDS lists are static and cycle by day-of-year, so they repeat
+# every 365 days. This generates new ones instead. See the module docstring
+# above re: factual-accuracy risk with a 1B model - shape is validated,
+# correctness is not.
+# ---------------------------------------------------------------------------
+
+# A topic hint per request, not just a bare instruction - without one,
+# llama3.2:1b collapses to near-identical output request after request
+# (repeatedly "what's the Red Planet? Mars." even at temperature 0.9).
+# Rotating a random topic into the prompt fixes that; a higher temperature
+# alone didn't.
+TRIVIA_TOPICS = [
+    "space exploration", "world history", "animals", "geography", "movies",
+    "music", "sports", "food and cooking", "inventions", "ocean life",
+    "mythology", "world capitals", "art", "technology", "human anatomy",
+]
+
+
+def generate_trivia():
+    topic = random.choice(TRIVIA_TOPICS)
+    prompt = (
+        f"Write one general-knowledge trivia question about {topic} and its "
+        "correct answer, suitable for a casual bedside trivia game.\n"
+        "Respond in EXACTLY this format and nothing else:\n"
+        "Q: <question>\n"
+        "A: <answer>\n\n"
+        "Example:\n"
+        "Q: What is the capital of France?\n"
+        "A: Paris.\n\n"
+        "Now write a new, different trivia question:"
+    )
+    text = call_ollama(prompt, num_predict=150, temperature=1.0)
+    q, a = parse_field(text, "Q"), parse_field(text, "A")
+    if not q or not a:
+        raise ValueError("malformed trivia response")
+    return {"q": q, "a": a}
+
+
+def generate_puzzle():
+    prompt = (
+        "Create an 'odd one out' word puzzle: four short words or names where "
+        "three share a category and one doesn't belong.\n"
+        "Respond in EXACTLY this format and nothing else:\n"
+        "OPTIONS: word, word, word, word\n"
+        "ODD: word\n"
+        "REASON: one sentence explaining why\n\n"
+        "Example:\n"
+        "OPTIONS: Salmon, Trout, Dolphin, Tuna\n"
+        "ODD: Dolphin\n"
+        "REASON: A dolphin is a mammal - the rest are fish.\n\n"
+        "Now create a new, different puzzle:"
+    )
+    text = call_ollama(prompt, num_predict=200, temperature=0.9, model=OLLAMA_PUZZLE_MODEL, timeout=60)
+    options_line, odd_word, reason = parse_field(text, "OPTIONS"), parse_field(text, "ODD"), parse_field(text, "REASON")
+    if not options_line or not odd_word or not reason:
+        raise ValueError("malformed puzzle response")
+    options = [o.strip() for o in options_line.split(",") if o.strip()]
+    if len(options) != 4:
+        raise ValueError(f"expected exactly 4 options, got {len(options)}")
+    if len({o.lower() for o in options}) != 4:
+        # Seen in testing: the model repeating one word twice instead of
+        # generating 4 distinct ones (e.g. "Penguin, Moose, Bear, Penguin") -
+        # shape-valid but would show two identical buttons on the puzzle UI.
+        raise ValueError("options aren't all distinct")
+    # Model names the odd word directly rather than computing a 0-based
+    # index itself - matched case-insensitively since it doesn't always
+    # echo the exact casing back.
+    odd_index = next((i for i, o in enumerate(options) if o.lower() == odd_word.lower()), None)
+    if odd_index is None:
+        raise ValueError("ODD word doesn't match any of the OPTIONS")
+    return {"options": options, "oddIndex": odd_index, "reason": reason}
+
+
+# ---------------------------------------------------------------------------
+# Weekly journal reflection - only ever called with content the dashboard
+# already unlocked with its own password (see script.js's isJournalLocked())
+# and only on an explicit tap, never automatically - see server/README.md's
+# privacy note. Stays on this LAN either way; this function is the only
+# place journal text is ever sent anywhere.
+# ---------------------------------------------------------------------------
+
+def generate_journal_reflection(entries):
+    if not entries:
+        raise ValueError("no entries provided")
+    joined = "\n".join(f"- {e.get('date', '')}: {e.get('text', '')}" for e in entries if e.get("text"))
+    if not joined.strip():
+        raise ValueError("entries had no text")
+
+    prompt = (
+        "Below are someone's private journal entries from the past week. Write a "
+        "short (3-4 sentence), warm, non-clinical reflection noticing any patterns "
+        "or themes - not a summary of events, more like a gentle observation a "
+        "thoughtful friend might make. No markdown, no bullet points, no "
+        "preamble - respond with ONLY the reflection itself.\n\n"
+        f"Entries:\n{joined}\n\nReflection:"
+    )
+    text = call_ollama(prompt, num_predict=200, temperature=0.7, timeout=60)
+    text = text.strip().strip("\"")
+    if not text:
+        raise ValueError("empty reflection")
+    return text
+
+
+# ---------------------------------------------------------------------------
+# Meal idea - a small, low-stakes generative task (unlike /trivia or
+# /puzzle, nothing here needs to be factually or logically "correct"), so
+# it stays on the fast 1B model rather than the puzzle model.
+# ---------------------------------------------------------------------------
+
+def generate_meal_idea(items):
+    if not items:
+        raise ValueError("no shopping list items provided")
+    item_list = ", ".join(str(i) for i in items[:25])  # cap - an enormous list doesn't need to all be quoted back
+    prompt = (
+        "Here are items on someone's shopping list: "
+        f"{item_list}.\n"
+        "Suggest one simple meal they could make using some of these (doesn't need to use "
+        "all of them, and a few common pantry staples like oil/salt/spices are fine to "
+        "assume). Respond with ONLY 2-3 sentences: the meal name and a one-line idea of "
+        "how to make it. No markdown, no preamble."
+    )
+    text = call_ollama(prompt, num_predict=150, temperature=0.8, timeout=30)
+    text = text.strip().strip("\"")
+    if not text:
+        raise ValueError("empty meal idea")
+    return text
+
+
+# ---------------------------------------------------------------------------
+# Heartbeat - just records "the dashboard checked in at time T" here. The
+# actual staleness check + alert lives in heartbeat_check.py, run on its own
+# systemd timer (see server/README.md) rather than inside this always-on
+# process, so a bug in this server doesn't also take out its own monitor.
+# ---------------------------------------------------------------------------
+
+def record_heartbeat():
+    HEARTBEAT_FILE.write_text(str(time.time()))
+
+
+# ---------------------------------------------------------------------------
+# Discord inbox - discord_bot.py (a separate always-on process, see
+# server/README.md) appends here when it recognizes a "note: ..." or
+# "shop: ..." DM; this server never talks to Discord directly, it only
+# reads/clears the same file. Mailbox pattern: each read consumes
+# (clears) whatever's queued, so the dashboard's periodic poll only ever
+# gets what's new since last time, not the same items over and over.
+# ---------------------------------------------------------------------------
+
+def consume_discord_inbox():
+    if not DISCORD_INBOX_FILE.exists():
+        return []
+    try:
+        items = json.loads(DISCORD_INBOX_FILE.read_text())
+    except (json.JSONDecodeError, OSError):
+        items = []
+    DISCORD_INBOX_FILE.write_text("[]")
+    return items if isinstance(items, list) else []
+
+
+# ---------------------------------------------------------------------------
+# Wallpaper rotation - drop photos into wallpapers/inbox/ (scp, see
+# server/README.md), this processes any not-yet-seen file into
+# wallpapers/processed/ (resized, JPEG, deduped by content hash) and serves
+# a random one. Processing runs lazily on request rather than via its own
+# timer/watcher, since new photos showing up is rare and this is cheap when
+# there's nothing new to do.
+# ---------------------------------------------------------------------------
+
+def load_wallpaper_manifest():
+    if WALLPAPER_MANIFEST_FILE.exists():
+        try:
+            return json.loads(WALLPAPER_MANIFEST_FILE.read_text())
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {}
+
+
+def save_wallpaper_manifest(manifest):
+    WALLPAPER_MANIFEST_FILE.write_text(json.dumps(manifest))
+
+
+def process_wallpaper_inbox():
+    from PIL import Image, ImageOps
+
+    manifest = load_wallpaper_manifest()  # source filename -> content hash already processed
+    for src in sorted(WALLPAPER_INBOX_DIR.iterdir()):
+        if not src.is_file():
+            continue
+        content = src.read_bytes()
+        content_hash = hashlib.sha256(content).hexdigest()[:16]
+        if manifest.get(src.name) == content_hash:
+            continue  # already processed, unchanged since
+        out_path = WALLPAPER_PROCESSED_DIR / f"{content_hash}.jpg"
+        if not out_path.exists():
+            try:
+                with Image.open(src) as img:
+                    img = ImageOps.exif_transpose(img)  # respect phone-camera rotation metadata
+                    img = img.convert("RGB")
+                    scale = min(1.0, WALLPAPER_MAX_DIMENSION / max(img.width, img.height))
+                    if scale < 1.0:
+                        img = img.resize((round(img.width * scale), round(img.height * scale)), Image.LANCZOS)
+                    img.save(out_path, "JPEG", quality=WALLPAPER_JPEG_QUALITY)
+            except Exception:
+                continue  # not a readable image - skip rather than crash the whole scan
+        manifest[src.name] = content_hash
+    save_wallpaper_manifest(manifest)
+
+
+def pick_random_wallpaper():
+    process_wallpaper_inbox()
+    files = list(WALLPAPER_PROCESSED_DIR.glob("*.jpg"))
+    if not files:
+        return None
+    return random.choice(files).read_bytes()
 
 
 # ---------------------------------------------------------------------------
@@ -325,6 +739,23 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._send_json(200, data)
             return
+        if parsed.path == "/wallpaper/random":
+            try:
+                data = pick_random_wallpaper()
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+                return
+            if data is None:
+                self._send_json(404, {"error": "no wallpapers processed yet - drop some into wallpapers/inbox/"})
+            else:
+                self._send_bytes(200, "image/jpeg", data)
+            return
+        if parsed.path == "/discord-inbox":
+            try:
+                self._send_json(200, {"items": consume_discord_inbox()})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
         self._send_json(404, {"error": "not found"})
 
     def do_POST(self):
@@ -359,6 +790,41 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(200, {"ok": True})
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
+            return
+        if parsed.path == "/trivia":
+            try:
+                self._send_json(200, generate_trivia())
+            except Exception as e:
+                self._send_json(502, {"error": str(e)})
+            return
+        if parsed.path == "/puzzle":
+            try:
+                self._send_json(200, generate_puzzle())
+            except Exception as e:
+                self._send_json(502, {"error": str(e)})
+            return
+        if parsed.path == "/journal-reflection":
+            try:
+                payload = self._read_json_body()
+                text = generate_journal_reflection(payload.get("entries") or [])
+                self._send_json(200, {"text": text})
+            except Exception as e:
+                self._send_json(502, {"error": str(e)})
+            return
+        if parsed.path == "/heartbeat":
+            try:
+                record_heartbeat()
+                self._send_json(200, {"ok": True})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
+        if parsed.path == "/meal-idea":
+            try:
+                payload = self._read_json_body()
+                text = generate_meal_idea(payload.get("items") or [])
+                self._send_json(200, {"text": text})
+            except Exception as e:
+                self._send_json(502, {"error": str(e)})
             return
         self._send_json(404, {"error": "not found"})
 

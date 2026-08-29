@@ -323,11 +323,15 @@
             <span class="icon-slot small" id="shoppinglist-title-icon" aria-hidden="true"></span>
             Shopping List
             <span class="card-title-badge" id="shoppinglist-progress"></span>
+            <button class="icon-button-small shoppinglist-meal-idea-btn hidden" id="shoppinglist-meal-idea-btn" type="button" aria-label="Suggest a meal from this list">
+              <span class="icon-slot tiny" id="shoppinglist-meal-idea-icon" aria-hidden="true"></span>
+            </button>
             <button class="icon-button-small shoppinglist-clear-btn" id="shoppinglist-clear-btn" type="button" aria-label="Clear checked items">
               <span class="icon-slot tiny" id="shoppinglist-clear-icon" aria-hidden="true"></span>
             </button>
           </h2>
           <div class="nightroutine-list" id="shoppinglist-list"></div>
+          <div class="settings-text-hint hidden" id="shoppinglist-meal-idea-text"></div>
           <div class="shoppinglist-add-row">
             <input type="text" id="shoppinglist-add-input" class="shoppinglist-add-input" placeholder="Add item…" maxlength="60" autocomplete="off" aria-label="Add shopping list item" />
             <button class="icon-button-small" id="shoppinglist-add-btn" type="button" aria-label="Add item">
@@ -1021,6 +1025,11 @@
         <div class="journal-callback hidden" id="journal-callback">
           <div class="journal-callback-label">One year ago today</div>
           <div class="journal-callback-text" id="journal-callback-text"></div>
+        </div>
+        <button class="alarm-action-btn timer-secondary-btn hidden" id="journal-reflection-btn" type="button">Weekly Reflection</button>
+        <div class="journal-callback hidden" id="journal-reflection-area">
+          <div class="journal-callback-label">This week</div>
+          <div class="journal-callback-text" id="journal-reflection-text"></div>
         </div>
       </div>
 

@@ -306,10 +306,11 @@ triple-beep that's easy to miss from another room.
 
 An optional, entirely opt-in LAN service — source in [`server/`](server/) —
 meant to run on hardware you already control (in this dashboard's case, a
-repurposed old laptop, not a third-party cloud), backing four things this
-kiosk WebView can't do fully on its own. Leave it unconfigured
+repurposed old laptop, not a third-party cloud). Leave it unconfigured
 (Settings → Companion Server) and none of the following applies; the
-dashboard works exactly as it does without it.
+dashboard works exactly as it does without it. Every feature below
+degrades silently to "unavailable" if the server address is unset or
+unreachable — nothing on the dashboard depends on it existing.
 
 - **Better spoken briefings**: this WebView doesn't implement
   `window.speechSynthesis` at all, so Bedtime/Good Morning Briefing had no
@@ -323,15 +324,47 @@ dashboard works exactly as it does without it.
   same backup object the local Export button produces to the server, and
   restore the latest one back — a second copy that survives a factory
   reset or a dead browser profile without needing a phone or a manual file
-  transfer.
+  transfer. A daily systemd-timer job also verifies the latest backup is
+  actually valid, non-corrupt JSON, and alerts if it isn't.
 - **A generated daily insight line**: a locally-run small language model
   (via [Ollama](https://ollama.com)) turns today's actual weather, sleep
-  streak, habit streaks, and next Agenda item into one real generated
-  sentence on the Overview, instead of picking from a canned template list
-  like Daily Quote/Word of the Day do.
-
-Every one of these degrades silently to "unavailable" if the server address
-is unset or unreachable — nothing on the dashboard depends on it.
+  streak, habit streaks, next Agenda item, a real statistical trend across
+  recent sleep/habit history, and how today's high compares to the last
+  5 years' average for this date, into one real generated sentence on the
+  Overview — instead of picking from a canned template list like Daily
+  Quote/Word of the Day do.
+- **Fresh Trivia and Puzzle content**: both previously cycled through a
+  fixed ~25-entry list keyed by day-of-year, repeating every 365 days. The
+  server now generates a new one daily (trivia on the fast model; the
+  "odd one out" Puzzle needs a larger one — `qwen2.5:3b-instruct` — since
+  the small model's answers frequently didn't even match one of the 4
+  words it had just generated). Both fall straight back to the static
+  list if the server's unreachable.
+- **A weekly, password-protected Journal reflection**: a short generated
+  reflection over the past week's entries, shown only inside the Journal
+  itself — meaning it inherits whatever password protection the Journal
+  already has, rather than adding a separate one. Journal text is only
+  ever sent on an explicit tap of "Weekly Reflection," never automatically.
+- **A meal idea from your Shopping List**: suggests something simple to
+  cook using whatever's currently on the list, via the same local model as
+  the daily insight.
+- **Dashboard heartbeat monitoring**: the dashboard checks in every 10
+  minutes; a separate systemd-timer job alerts via [ntfy.sh](https://ntfy.sh)
+  (free, keyless push notifications) if it goes quiet for too long -
+  crashed, powered off, wifi dropped. Given this exact device's history of
+  silently failing to relaunch after a reboot, this is the one Companion
+  Server feature that's arguably more important than any of the others.
+- **Server-curated wallpaper rotation**: drop photos into a folder on the
+  server (scp) and it resizes/re-encodes/dedupes them; the dashboard pulls
+  one new one into its existing photo rotation each day, capped at 15
+  server-sourced photos so it doesn't grow forever.
+- **Discord integration**: DM a small dedicated bot "note: \<text\>" or
+  "shop: \<item\>" from anywhere, and it shows up as a Sticky Note or
+  Shopping List item on the next poll (every 5 minutes). The one feature
+  here that's an *additional* remote input channel rather than something
+  the dashboard generates on its own — the dashboard itself stays exactly
+  as phone-free as ever; this is purely optional icing for when you think
+  of something to add to a list while you're out.
 
 ## Requirements
 

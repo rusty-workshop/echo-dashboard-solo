@@ -2653,6 +2653,61 @@ async function companionServerReachable() {
   return !!resp;
 }
 
+// Lets the server's own separate heartbeat_check.py (a systemd timer, not
+// part of the always-on server process) notice and alert if this dashboard
+// goes quiet - crashed, powered off, wifi dropped. Pure fire-and-forget:
+// failures here aren't logged or surfaced anywhere on the dashboard itself,
+// since a missed heartbeat is exactly what the server-side check is for.
+const HEARTBEAT_INTERVAL_MS = 10 * 60 * 1000;
+
+async function sendHeartbeat() {
+  await companionFetch("/heartbeat", { method: "POST", timeoutMs: 5000 });
+}
+
+function setupHeartbeat() {
+  if (!companionServerConfig()) return;
+  sendHeartbeat();
+  setInterval(sendHeartbeat, HEARTBEAT_INTERVAL_MS);
+}
+
+// ---------------------------------------------------------------------------
+// Discord inbox - DM the Companion Server's Discord bot ("note: ..." or
+// "shop: ..." - see discord_bot.py) from anywhere, and it shows up here on
+// the next poll. The dashboard is still fully phone-free on its own; this
+// is an *additional*, entirely optional way to get something onto it
+// remotely, not a dependency the core experience needs.
+// ---------------------------------------------------------------------------
+const DISCORD_INBOX_POLL_INTERVAL_MS = 5 * 60 * 1000;
+
+async function pollDiscordInbox() {
+  const resp = await companionFetch("/discord-inbox", { timeoutMs: 10000 });
+  if (!resp) return;
+  const data = await resp.json();
+  const items = data.items || [];
+  if (items.length === 0) return;
+
+  let shoppingListChanged = false;
+  for (const item of items) {
+    if (!item.text) continue;
+    if (item.type === "note") {
+      addStickyNote(item.text);
+    } else if (item.type === "shop") {
+      shoppingListItems.push({ id: `shop-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, label: item.text, checked: false });
+      shoppingListChanged = true;
+    }
+  }
+  if (shoppingListChanged) {
+    saveShoppingList();
+    renderShoppingList();
+  }
+}
+
+function setupDiscordInboxPolling() {
+  if (!companionServerConfig()) return;
+  pollDiscordInbox();
+  setInterval(pollDiscordInbox, DISCORD_INBOX_POLL_INTERVAL_MS);
+}
+
 let activeCompanionAudio = null;
 // Whichever button currently shows .speaking, if any - covers the whole
 // span from tap to either cancel or natural completion, across both the
@@ -2799,7 +2854,7 @@ function setupBedtimeBriefing() {
     btn?.classList.add("hidden");
     return;
   }
-  setIcon("bedtime-briefing-icon", "speaker");
+  setIcon("bedtime-briefing-icon", "moon");
   btn?.addEventListener("click", speakBedtimeBriefing);
 }
 
@@ -4338,6 +4393,61 @@ function renderWallpaperSettings() {
   byId("wallpaper-black-toggle")?.setAttribute("aria-checked", String(wallpaperForcedBlack));
 }
 
+// ---------------------------------------------------------------------------
+// Server-curated wallpaper rotation - an optional trickle of one new photo
+// per day from the Companion Server's wallpapers/processed/ folder (drop
+// files into wallpapers/inbox/ on the server, see server/README.md; it
+// handles resizing/JPEG re-encoding/dedup server-side, same idea as
+// resizeImageFile() below just done once centrally instead of per-import).
+// Reuses the exact same IndexedDB storage and rotation logic as manually
+// imported photos - a server-sourced photo is just another entry in
+// wallpaperPhotoIds, distinguished only by its "server-" id prefix so this
+// can find and cap its own subset without touching manually imported ones.
+// ---------------------------------------------------------------------------
+const SERVER_WALLPAPER_LAST_PULL_KEY = "aurora-dashboard:server-wallpaper-last-pull";
+const SERVER_WALLPAPER_MAX_COUNT = 15;
+
+async function sha256Hex(buffer) {
+  const digest = await crypto.subtle.digest("SHA-256", buffer);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function pullServerWallpaper() {
+  if (!companionServerConfig()) return;
+  const todayKey = localDateKey(new Date());
+  if (localStorage.getItem(SERVER_WALLPAPER_LAST_PULL_KEY) === todayKey) return;
+
+  const resp = await companionFetch("/wallpaper/random", { timeoutMs: 15000 });
+  if (!resp) return;
+  const blob = await resp.blob();
+  const hash = await sha256Hex(await blob.arrayBuffer());
+  const id = `server-${hash.slice(0, 16)}`;
+
+  localStorage.setItem(SERVER_WALLPAPER_LAST_PULL_KEY, todayKey);
+  if (wallpaperPhotoIds.includes(id)) return; // server reshuffled into one already pulled before
+
+  await saveWallpaperRecord(id, blob);
+  wallpaperPhotoIds.push(id);
+
+  // Cap how many server-sourced photos accumulate over time - evict the
+  // oldest ones first, never touching manually imported ("wallpaper_...")
+  // photos, which aren't part of this rotation at all.
+  const serverIds = wallpaperPhotoIds.filter((pid) => pid.startsWith("server-"));
+  if (serverIds.length > SERVER_WALLPAPER_MAX_COUNT) {
+    for (const oldId of serverIds.slice(0, serverIds.length - SERVER_WALLPAPER_MAX_COUNT)) {
+      await deleteWallpaperRecord(oldId);
+      wallpaperPhotoIds = wallpaperPhotoIds.filter((pid) => pid !== oldId);
+      const url = wallpaperObjectUrls.get(oldId);
+      if (url) URL.revokeObjectURL(url);
+      wallpaperObjectUrls.delete(oldId);
+      if (wallpaperSingleId === oldId) {
+        wallpaperSingleId = null;
+        localStorage.removeItem(WALLPAPER_SINGLE_KEY);
+      }
+    }
+  }
+}
+
 async function setupWallpaperSettings() {
   const importInput = byId("wallpaper-import-input");
   const importLabel = byId("wallpaper-import-label");
@@ -4358,6 +4468,7 @@ async function setupWallpaperSettings() {
   } catch (err) {
     wallpaperPhotoIds = [];
   }
+  pullServerWallpaper();
   renderWallpaperSettings();
   applyWallpaperMode();
 
@@ -6684,6 +6795,48 @@ function setupShoppingList() {
     saveShoppingList();
     renderShoppingList();
   });
+
+  setupMealIdea();
+}
+
+/** Suggests a simple meal from whatever's currently on the Shopping List,
+ *  via the Companion Server (see generate_meal_idea() in server.py) -
+ *  purely a fun supplement, stays hidden entirely without a server
+ *  configured rather than offering a button that can't do anything. */
+async function requestMealIdea() {
+  if (!companionServerConfig() || shoppingListItems.length === 0) return;
+  const btn = byId("shoppinglist-meal-idea-btn");
+  const textEl = byId("shoppinglist-meal-idea-text");
+  if (btn) btn.disabled = true;
+  if (textEl) {
+    textEl.textContent = "Thinking of something...";
+    textEl.classList.remove("hidden");
+  }
+
+  const resp = await companionFetch("/meal-idea", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ items: shoppingListItems.map((i) => i.label) }),
+    timeoutMs: 30000,
+  });
+  if (btn) btn.disabled = false;
+  if (!resp) {
+    if (textEl) textEl.classList.add("hidden");
+    return;
+  }
+  const data = await resp.json();
+  if (textEl && data.text) {
+    textEl.textContent = data.text;
+    textEl.classList.remove("hidden");
+  }
+}
+
+function setupMealIdea() {
+  const btn = byId("shoppinglist-meal-idea-btn");
+  if (!companionServerConfig()) return; // stays hidden - no server, no meal ideas
+  setIcon("shoppinglist-meal-idea-icon", "flame");
+  btn?.classList.remove("hidden");
+  btn?.addEventListener("click", requestMealIdea);
 }
 
 // ---------------------------------------------------------------------------
@@ -8104,6 +8257,16 @@ function dynamicInsightFacts() {
   const weather = lastWeatherData;
   if (weather) {
     facts.weather = `${weather.condition}, currently ${displayTemp(weather.temperature)}, high ${displayTemp(weather.high)}${weather.low != null ? `, low ${displayTemp(weather.low)}` : ""}`;
+    // Raw Fahrenheit (not the display-converted value) + this dashboard's
+    // location, so the server can compare against its own historical
+    // average for today's date - see historical_high_average() in
+    // server.py. Omitted (server just skips that fact) if weather hasn't
+    // loaded yet.
+    if (weather.high != null) {
+      facts.lat = HOME_LATITUDE;
+      facts.lon = HOME_LONGITUDE;
+      facts.todayHigh = weather.high;
+    }
   }
 
   const sleepStreak = computeSleepStreak(sleepMinutesByDate());
@@ -8124,6 +8287,16 @@ function dynamicInsightFacts() {
   if (firstEvent) {
     facts.calendar = firstEvent.title + (firstEvent.time ? ` at ${formatTimeOfDay(firstEvent.time)}` : "");
   }
+
+  // Raw history, not a pre-computed summary - the server does the actual
+  // correlation math (see compute_trend_fact() in server.py) since a 1B
+  // local model is unreliable at arithmetic, and folds any real finding
+  // back into the same one-sentence insight rather than a separate stat.
+  facts.sleepHistory = [...sleepMinutesByDate().entries()].map(([date, minutes]) => ({ date, minutes }));
+  facts.habitCompletionByDate = Array.from({ length: 60 }, (_, i) => {
+    const dateKey = localDateKey(new Date(Date.now() - i * 86400000));
+    return { date: dateKey, completed: habits.some((h) => (habitLog[h.id] || []).includes(dateKey)) };
+  });
 
   return facts;
 }
@@ -8202,8 +8375,25 @@ const TRIVIA_QUESTIONS = [
   { q: "What ancient wonder of the world still stands today?", a: "The Great Pyramid of Giza." },
 ];
 
+// If the Companion Server generated one today (see refreshServerTrivia()
+// below), use that instead of the static day-of-year pick - still falls
+// straight back to the static list on any day it didn't/couldn't.
+const SERVER_TRIVIA_KEY = "aurora-dashboard:server-trivia";
+
+function currentTrivia() {
+  const todayKey = localDateKey(new Date());
+  let cached = null;
+  try {
+    cached = JSON.parse(localStorage.getItem(SERVER_TRIVIA_KEY) || "null");
+  } catch (err) {
+    cached = null;
+  }
+  if (cached && cached.date === todayKey) return { q: cached.q, a: cached.a };
+  return TRIVIA_QUESTIONS[dayOfYear(new Date()) % TRIVIA_QUESTIONS.length];
+}
+
 function renderDailyTrivia() {
-  const trivia = TRIVIA_QUESTIONS[dayOfYear(new Date()) % TRIVIA_QUESTIONS.length];
+  const trivia = currentTrivia();
   setText("trivia-question", trivia.q);
   const answerEl = byId("trivia-answer");
   if (answerEl) {
@@ -8213,9 +8403,28 @@ function renderDailyTrivia() {
   byId("trivia-reveal-btn")?.classList.remove("hidden");
 }
 
+/** Generates once per day (cached, same idea as Dynamic Insight) rather
+ *  than on every visit to the Trivia tab - a generation costs a few
+ *  seconds of the server's CPU. Silently does nothing if unconfigured or
+ *  unreachable; the static list is always there as a fallback either way. */
+async function refreshServerTrivia() {
+  if (!companionServerConfig()) return;
+  const todayKey = localDateKey(new Date());
+  const cached = JSON.parse(localStorage.getItem(SERVER_TRIVIA_KEY) || "null");
+  if (cached && cached.date === todayKey) return;
+
+  const resp = await companionFetch("/trivia", { method: "POST", timeoutMs: 20000 });
+  if (!resp) return;
+  const data = await resp.json();
+  if (!data.q || !data.a) return;
+  localStorage.setItem(SERVER_TRIVIA_KEY, JSON.stringify({ date: todayKey, q: data.q, a: data.a }));
+  renderDailyTrivia();
+}
+
 function setupDailyTrivia() {
   setIcon("trivia-title-icon", "sparkle");
   renderDailyTrivia();
+  refreshServerTrivia();
   byId("trivia-reveal-btn")?.addEventListener("click", () => {
     byId("trivia-answer")?.classList.remove("hidden");
     byId("trivia-reveal-btn")?.classList.add("hidden");
@@ -8320,8 +8529,52 @@ function showPuzzleResult(round, chosenIndex, correct) {
   }
 }
 
+// Same "prefer today's server-generated one, fall back to the static
+// day-of-year pick" idea as currentTrivia() above.
+const SERVER_PUZZLE_KEY = "aurora-dashboard:server-puzzle";
+
+function currentPuzzleRound() {
+  const todayKey = localDateKey(new Date());
+  let cached = null;
+  try {
+    cached = JSON.parse(localStorage.getItem(SERVER_PUZZLE_KEY) || "null");
+  } catch (err) {
+    cached = null;
+  }
+  if (cached && cached.date === todayKey) {
+    return { options: cached.options, oddIndex: cached.oddIndex, reason: cached.reason };
+  }
+  return PUZZLE_ROUNDS[dayOfYear(new Date()) % PUZZLE_ROUNDS.length];
+}
+
+/** Generates once per day, same caching idea as refreshServerTrivia() -
+ *  note the puzzle endpoint runs a larger model server-side specifically
+ *  because the small one wasn't reliable at "odd one out" logic (see
+ *  server.py's own comment on generate_puzzle()), so this can take
+ *  noticeably longer than the trivia refresh - still fine, it's a
+ *  background fetch, not something the UI waits on. */
+async function refreshServerPuzzle() {
+  if (!companionServerConfig()) return;
+  const todayKey = localDateKey(new Date());
+  const cached = JSON.parse(localStorage.getItem(SERVER_PUZZLE_KEY) || "null");
+  if (cached && cached.date === todayKey) return;
+
+  const resp = await companionFetch("/puzzle", { method: "POST", timeoutMs: 30000 });
+  if (!resp) return;
+  const data = await resp.json();
+  if (!Array.isArray(data.options) || data.options.length !== 4 || typeof data.oddIndex !== "number" || !data.reason) return;
+  localStorage.setItem(
+    SERVER_PUZZLE_KEY,
+    JSON.stringify({ date: todayKey, options: data.options, oddIndex: data.oddIndex, reason: data.reason })
+  );
+  // Only re-render if today's puzzle hasn't already been answered - don't
+  // swap the options out from under someone mid-guess or after they've
+  // already played today's (static) round.
+  if (!todaysPuzzleResult()) renderDailyPuzzle();
+}
+
 function renderDailyPuzzle() {
-  const round = PUZZLE_ROUNDS[dayOfYear(new Date()) % PUZZLE_ROUNDS.length];
+  const round = currentPuzzleRound();
   const container = byId("puzzle-options");
   if (!container) return;
   dailyPuzzleAnswered = false;
@@ -8351,12 +8604,13 @@ function renderDailyPuzzle() {
 function setupDailyPuzzle() {
   setIcon("puzzle-title-icon", "sparkle");
   renderDailyPuzzle();
+  refreshServerPuzzle();
   byId("puzzle-options")?.addEventListener("click", (event) => {
     if (dailyPuzzleAnswered) return;
     const btn = event.target.closest(".puzzle-option-btn");
     if (!btn) return;
 
-    const round = PUZZLE_ROUNDS[dayOfYear(new Date()) % PUZZLE_ROUNDS.length];
+    const round = currentPuzzleRound();
     const chosenIndex = Number(btn.dataset.index);
     const correct = chosenIndex === round.oddIndex;
     showPuzzleResult(round, chosenIndex, correct);
@@ -8469,6 +8723,13 @@ function renderJournal() {
   historyBtn?.classList.toggle("hidden", locked);
   if (locked) {
     callback?.classList.add("hidden");
+    // Not an early return above renderJournalReflection() - that call has
+    // to run in the locked case too, since it's the thing that hides the
+    // Weekly Reflection button itself. It was missed here once already:
+    // this exact early return skipped it entirely, leaving the button
+    // visible (and clickable, and able to send journal content off-device)
+    // even while the Journal was showing as locked.
+    renderJournalReflection();
     return;
   }
 
@@ -8486,6 +8747,95 @@ function renderJournal() {
       callback.classList.add("hidden");
     }
   }
+
+  renderJournalReflection();
+}
+
+// ---------------------------------------------------------------------------
+// Weekly Reflection - a generated 3-4 sentence reflection over the past
+// week's Journal entries, from the Companion Server (local model only,
+// never a cloud call - see generate_journal_reflection() in server.py).
+// Explicitly gated behind the *same* protection the Journal itself already
+// has: the button only ever appears while isJournalLocked() is false (see
+// setupWeeklyReflection() below), and journal text is only ever sent on an
+// explicit tap of this button - never automatically, never in the
+// background. If no password is set on the Journal, this is exactly as
+// open as the Journal itself already is - it doesn't add its own separate
+// password, it inherits whichever protection the Journal already has.
+// ---------------------------------------------------------------------------
+const JOURNAL_REFLECTION_KEY = "aurora-dashboard:journal-reflection";
+
+/** ISO 8601 week number as "YYYY-Www" - used as the cache key so this only
+ *  ever generates once per calendar week, not once per tap. */
+function currentIsoWeekKey(date) {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+  return `${d.getUTCFullYear()}-W${weekNo}`;
+}
+
+function renderJournalReflection() {
+  const area = byId("journal-reflection-area");
+  const text = byId("journal-reflection-text");
+  const btn = byId("journal-reflection-btn");
+  // Both conditions matter here: no server configured means the feature
+  // never applies at all, and locked means it's not applicable *right now*
+  // - either way, the button (which would otherwise let a tap send journal
+  // content off-device) has to stay hidden, not just the display area.
+  const canShow = !isJournalLocked() && !!companionServerConfig();
+  btn?.classList.toggle("hidden", !canShow);
+  if (!area || !text) return;
+  if (!canShow) {
+    area.classList.add("hidden");
+    return;
+  }
+  const cached = JSON.parse(localStorage.getItem(JOURNAL_REFLECTION_KEY) || "null");
+  const thisWeek = currentIsoWeekKey(new Date());
+  if (cached && cached.week === thisWeek) {
+    text.textContent = cached.text;
+    area.classList.remove("hidden");
+  } else {
+    area.classList.add("hidden");
+  }
+}
+
+async function generateWeeklyReflection() {
+  if (isJournalLocked() || !companionServerConfig()) return;
+  const btn = byId("journal-reflection-btn");
+
+  const cutoff = Date.now() - 7 * 86400000;
+  const entries = Object.entries(journalEntries)
+    .filter(([date]) => new Date(date).getTime() >= cutoff)
+    .map(([date, text]) => ({ date, text }));
+  if (entries.length === 0) return;
+
+  const originalLabel = btn?.textContent;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Reflecting...";
+  }
+  const resp = await companionFetch("/journal-reflection", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ entries }),
+    timeoutMs: 30000,
+  });
+  if (btn) {
+    btn.disabled = false;
+    btn.textContent = originalLabel;
+  }
+  if (!resp) return;
+  const data = await resp.json();
+  if (!data.text) return;
+  localStorage.setItem(JOURNAL_REFLECTION_KEY, JSON.stringify({ week: currentIsoWeekKey(new Date()), text: data.text }));
+  renderJournalReflection();
+}
+
+function setupWeeklyReflection() {
+  renderJournalReflection();
+  byId("journal-reflection-btn")?.addEventListener("click", generateWeeklyReflection);
 }
 
 function setupJournal() {
@@ -8495,6 +8845,7 @@ function setupJournal() {
   renderJournal();
   setupJournalUnlockGate();
   setupJournalPasswordSettings();
+  setupWeeklyReflection();
 
   byId("journal-textarea")?.addEventListener("input", (event) => {
     const todayKey = localDateKey(new Date());
@@ -9128,6 +9479,8 @@ function init() {
   setupWordOfTheDay();
   setupDynamicInsight();
   setupCompanionServerSettings();
+  setupHeartbeat();
+  setupDiscordInboxPolling();
   setupBackupSettings();
   loadTodayInHistory();
 
