@@ -143,22 +143,33 @@ send a follow-up "back to normal" notification once resolved.
 
 ## Discord bot setup
 
-Lets Rusty DM the bot from anywhere to add a Sticky Note (`note: <text>`)
-or Shopping List item (`shop: <item>`) to the dashboard - see
+Lets Rusty run `/note <text>` or `/shop <item>` from anywhere on Discord to
+add a Sticky Note or Shopping List item to the dashboard - see
 `discord_bot.py`'s own docstring for exactly how it queues things and
 `GET /discord-inbox` in `server.py` for how the dashboard picks them up.
 This is a **separate bot/token** from the `judgment-bot` already running on
 this box, on purpose - keeps the two projects' Discord presence
 independent.
 
+Built as a **user-installed app**, not a traditional guild bot - installed
+to Rusty's own Discord account rather than added to a server he admins,
+which is what makes `/note`/`/shop` work in a DM with the bot *and* in any
+server he's a member of, admin or not. This is why the commands are slash
+commands rather than the plain-text `note: ...`/`shop: ...` DM parsing an
+earlier version of this file used - a user-installed app only receives
+slash-command interactions, not arbitrary message content, in places the
+bot account itself isn't a member of.
+
 1. [Discord Developer Portal](https://discord.com/developers/applications) → New Application → name it something like "Bedside Dashboard"
 2. Bot tab → Add Bot → Reset Token, copy it
-3. Bot tab → Privileged Gateway Intents → enable **Message Content Intent** (required to read DM text)
-4. Add the token to `~/dashboard-server/env` as `DASHBOARD_DISCORD_BOT_TOKEN=...`, then:
+3. Bot tab → Privileged Gateway Intents → enable **Message Content Intent**
+4. Installation tab → confirm **User Install** is checked under Installation Contexts (it's on by default) - its default scope should already be `applications.commands`, which is all it needs
+5. Add the token to `~/dashboard-server/env` as `DASHBOARD_DISCORD_BOT_TOKEN=...`, then:
    ```bash
    ssh latitude "chmod 600 ~/dashboard-server/env; systemctl --user daemon-reload && systemctl --user enable --now dashboard-discord-bot.service"
    ```
-5. In Discord, open a DM with the bot (find it under your server's member list, or use its invite URL from the Developer Portal's OAuth2 tab with just the `bot` scope) and send it a message - no server-wide install needed for DMs to work.
+6. Install the app to your own account via the Install Link on the Installation tab (`https://discord.com/oauth2/authorize?client_id=<app id>` - no `scope`/`permissions` params needed, the page itself offers the choice of installing "for yourself"). Global slash commands can take up to ~an hour to propagate the first time a bot starts; instant on every restart after that.
+7. `/note` or `/shop` now work in a DM with the bot, or typed into any server you're in - no admin permissions or guild install needed anywhere.
 
 ## Wallpaper rotation
 

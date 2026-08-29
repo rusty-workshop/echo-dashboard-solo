@@ -358,13 +358,15 @@ unreachable — nothing on the dashboard depends on it existing.
   server (scp) and it resizes/re-encodes/dedupes them; the dashboard pulls
   one new one into its existing photo rotation each day, capped at 15
   server-sourced photos so it doesn't grow forever.
-- **Discord integration**: DM a small dedicated bot "note: \<text\>" or
-  "shop: \<item\>" from anywhere, and it shows up as a Sticky Note or
-  Shopping List item on the next poll (every 5 minutes). The one feature
-  here that's an *additional* remote input channel rather than something
-  the dashboard generates on its own — the dashboard itself stays exactly
-  as phone-free as ever; this is purely optional icing for when you think
-  of something to add to a list while you're out.
+- **Discord integration**: `/note <text>` or `/shop <item>` from anywhere on
+  Discord — a DM with a small dedicated bot, or any server you're in, no
+  admin permissions needed anywhere, since it's installed to your own
+  account rather than added to a server — shows up as a Sticky Note or
+  Shopping List item on the dashboard's next poll (every 5 minutes). The
+  one feature here that's an *additional* remote input channel rather than
+  something the dashboard generates on its own — the dashboard itself
+  stays exactly as phone-free as ever; this is purely optional icing for
+  when you think of something to add to a list while you're out.
 
 ## Requirements
 

@@ -1,22 +1,32 @@
 #!/usr/bin/env python3
 """Discord bot for echo-dashboard-solo's Companion Server - lets Rusty add
-a Sticky Note or Shopping List item to the bedside dashboard from anywhere,
-by DMing this bot on Discord. A separate always-on process from server.py
-(its own systemd service, dashboard-discord-bot.service - see
-server/README.md), not imported by it; the two only ever communicate
-through data/discord_inbox.json, which server.py's GET /discord-inbox
-reads and clears (see consume_discord_inbox() there) and the dashboard
-polls periodically.
+a Sticky Note or Shopping List item to the bedside dashboard from anywhere
+on Discord. A separate always-on process from server.py (its own systemd
+service, dashboard-discord-bot.service - see server/README.md), not
+imported by it; the two only ever communicate through
+data/discord_inbox.json, which server.py's GET /discord-inbox reads and
+clears (see consume_discord_inbox() there) and the dashboard polls
+periodically.
 
-DM commands (case-insensitive prefix, rest of the message is the text):
-  note: <text>   -> queued as a Sticky Note
-  shop: <item>   -> queued as a Shopping List item
-Anything else gets a short reply explaining the two commands, and isn't
-queued.
+Slash commands, not plain-text DM parsing (an earlier version of this file
+worked that way - see git history) - this app is installed as a **user
+install** (Developer Portal → Installation → both User Install and Guild
+Install are enabled, User Install's default scope is applications.commands),
+which is what actually gets you "works in a DM with the bot AND in any
+server, without needing to add the bot to a server you admin." User-installed
+apps only receive slash-command interactions, not arbitrary message content,
+in contexts the bot itself isn't a member of - so slash commands are the
+only interface that actually works everywhere the install is meant to reach.
+Global command sync (see setup_hook()) can take up to about an hour to
+propagate the first time; it's instant on every restart after that.
+
+Commands:
+  /note text:<text>   -> queued as a Sticky Note
+  /shop item:<item>   -> queued as a Shopping List item
 
 Needs its own bot token (DASHBOARD_DISCORD_BOT_TOKEN in
-~/dashboard-server/env) - separate from the judgment-bot already running
-on this same box, kept as its own Discord Application/Bot so this
+~/dashboard-server/env) - separate from the judgment-bot already running on
+this same box, kept as its own Discord Application/Bot so this
 dashboard-specific integration doesn't get tangled up with that unrelated
 project. See server/README.md for the exact Developer Portal steps.
 """
@@ -27,13 +37,12 @@ import time
 from pathlib import Path
 
 import discord
+from discord import app_commands
 
 BASE = Path(__file__).resolve().parent
 DISCORD_INBOX_FILE = BASE / "data" / "discord_inbox.json"
 
 TOKEN = os.environ.get("DASHBOARD_DISCORD_BOT_TOKEN", "")
-
-HELP_TEXT = "Try one of these:\n`note: <text>` - adds a Sticky Note\n`shop: <item>` - adds a Shopping List item"
 
 
 def queue_item(item_type, text):
@@ -54,40 +63,39 @@ def queue_item(item_type, text):
 
 
 class DashboardBot(discord.Client):
+    def __init__(self, *, intents):
+        super().__init__(intents=intents)
+        self.tree = app_commands.CommandTree(self)
+
+    async def setup_hook(self):
+        await self.tree.sync()
+
     async def on_ready(self):
         print(f"discord_bot logged in as {self.user}")
 
-    async def on_message(self, message):
-        if message.author.bot or not isinstance(message.channel, discord.DMChannel):
-            return
 
-        text = message.content.strip()
-        lowered = text.lower()
+intents = discord.Intents.default()
+client = DashboardBot(intents=intents)
 
-        if lowered.startswith("note:") or lowered.startswith("note "):
-            note_text = text[5:].strip()
-            if note_text:
-                queue_item("note", note_text)
-                await message.add_reaction("✅")
-                return
-        elif lowered.startswith("shop:") or lowered.startswith("shop "):
-            item_text = text[5:].strip()
-            if item_text:
-                queue_item("shop", item_text)
-                await message.add_reaction("✅")
-                return
 
-        await message.channel.send(HELP_TEXT)
+@client.tree.command(name="note", description="Add a Sticky Note to the bedside dashboard")
+@app_commands.describe(text="What the note should say")
+async def note_command(interaction: discord.Interaction, text: str):
+    queue_item("note", text)
+    await interaction.response.send_message(f"Added to Sticky Notes: {text}", ephemeral=True)
+
+
+@client.tree.command(name="shop", description="Add an item to the bedside dashboard's Shopping List")
+@app_commands.describe(item="What to add")
+async def shop_command(interaction: discord.Interaction, item: str):
+    queue_item("shop", item)
+    await interaction.response.send_message(f"Added to Shopping List: {item}", ephemeral=True)
 
 
 def main():
     if not TOKEN:
         print("DASHBOARD_DISCORD_BOT_TOKEN not set - nothing to do. See server/README.md.")
         sys.exit(0)
-
-    intents = discord.Intents.default()
-    intents.message_content = True
-    client = DashboardBot(intents=intents)
     client.run(TOKEN)
 
 
