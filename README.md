@@ -47,6 +47,15 @@ triple-beep that's easy to miss from another room.
 
 ## Features
 
+- **First-run Setup Wizard**: shown exactly once, before anything else, on
+  a fresh install. Asks for a name (optional), a location — searched by
+  city name via [Open-Meteo's geocoding API](https://open-meteo.com/en/docs/geocoding-api)
+  and picked from real results, not a hardcoded default — clock format,
+  temperature unit, and whether to try the optional
+  [Companion Server](#companion-server-optional) (answering yes pops up a
+  direct link to its setup instructions). Everything here can be changed
+  again later in Settings; this just gets the dashboard usable on first
+  boot without digging through Settings first.
 - **Nine swipeable pages** (CSS scroll-snap, real touch scrolling,
   tap-to-jump dot indicators): a Morning Overview, a Daily Info page, a
   Clock/Alarm/Sound Machine page, a Wake Alarms page, a Sleep Insights page,
@@ -58,8 +67,9 @@ triple-beep that's easy to miss from another room.
   and rain probability (both a same-day hourly estimate and a 15-minute-
   resolution near-term nowcast — "Rain starting in ~15 min" — for whichever
   is more precise); the [National Weather Service](https://www.weather.gov/documentation/services-web-api)
-  for severe alerts and the radar station covering this dashboard's fixed
-  home coordinate (see `HOME_LATITUDE`/`HOME_LONGITUDE` in `script.js`).
+  for severe alerts and the radar station covering this dashboard's home
+  coordinate (set once by the Setup Wizard above - see
+  `HOME_LATITUDE`/`HOME_LONGITUDE` in `script.js`).
   Both are free, need no API key, and are fetched directly from the
   browser — no backend in between. When it's actually raining, the Sound
   Machine card offers a one-tap, once-a-day, dismissible suggestion to
@@ -332,8 +342,9 @@ is unset or unreachable — nothing on the dashboard depends on it.
   it renders fine in any browser window.
 - A network connection reachable to `api.open-meteo.com`,
   `air-quality-api.open-meteo.com`, `api.weather.gov`, and
-  `radar.weather.gov` for weather/alerts/radar, and to
-  `api.wikimedia.org` for Today in History. Everything else works fully
+  `radar.weather.gov` for weather/alerts/radar, `api.wikimedia.org` for
+  Today in History, and `geocoding-api.open-meteo.com` for the Setup
+  Wizard's location search (first run only). Everything else works fully
   offline once loaded.
 
 No build tools, no package manager, no dependencies, no backend: just
@@ -348,15 +359,7 @@ No build tools, no package manager, no dependencies, no backend: just
    cd echo-dashboard-solo
    ```
 
-2. **Set your home coordinate** — edit the two constants at the top of
-   `script.js` (defaults to Jacksonville, FL):
-
-   ```js
-   const HOME_LATITUDE = 30.1588;
-   const HOME_LONGITUDE = -81.6206;
-   ```
-
-3. **Serve the three files.** Any static file server works:
+2. **Serve the three files.** Any static file server works:
 
    ```
    python3 -m http.server 8090
@@ -364,10 +367,15 @@ No build tools, no package manager, no dependencies, no backend: just
 
    then open `http://localhost:8090/`.
 
-4. **Point your display's browser at that URL** and set it to kiosk/full-screen
+3. **Point your display's browser at that URL** and set it to kiosk/full-screen
    mode. On Fully Kiosk Browser, either serve these files from a small local
    HTTP server on the device itself, or use a `file://` URL if your kiosk
    setup allows it — either way, keep all three files in the same directory.
+
+4. **First launch** shows the Setup Wizard — pick a home location there
+   (searched by city name, not a hardcoded default) along with a name,
+   clock format, and temperature unit. Shown exactly once; everything it
+   sets can be changed again later in Settings.
 
 5. **(Optional) Enable Fully Kiosk's JS interface** if you want the
    night auto-dim and alarm-ringing ramp to control the actual screen

@@ -44,7 +44,7 @@ OLLAMA_MODEL = os.environ.get("DASHBOARD_OLLAMA_MODEL", "llama3.2:1b")
 
 PIPER_BIN = BASE / "piper" / "piper" / "piper"
 PIPER_MODEL = Path(
-    os.environ.get("DASHBOARD_PIPER_MODEL", str(BASE / "piper" / "voices" / "en_US-lessac-medium.onnx"))
+    os.environ.get("DASHBOARD_PIPER_MODEL", str(BASE / "piper" / "voices" / "en_US-lessac-high.onnx"))
 )
 
 TLE_URL = "https://celestrak.org/NORAD/elements/gp.php?CATNR=25544&FORMAT=TLE"

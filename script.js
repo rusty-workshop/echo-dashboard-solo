@@ -33,12 +33,36 @@
 // Configuration
 // ---------------------------------------------------------------------------
 
-// Fixed home coordinate, used for weather/alerts/radar - there's no phone
-// location to follow anymore, so unlike Aurora's own fallback this is the
-// only coordinate this build ever uses. Update these two if this dashboard
-// ever moves somewhere else.
-const HOME_LATITUDE = 30.1588;
-const HOME_LONGITUDE = -81.6206;
+// Home coordinate, used for weather/alerts/radar/ISS passes - there's no
+// phone location to follow anymore, so unlike Aurora's own fallback this is
+// the only coordinate this build ever uses. Set by the first-run Setup
+// Wizard (see HOME_LOCATION_KEY/saveHomeLocation() below), not a baked-in
+// city - the geographic center of the contiguous US is just a neutral
+// placeholder for the brief window before that wizard's location step is
+// completed, not a real assumed home.
+const HOME_LOCATION_KEY = "aurora-dashboard:home-location"; // {lat, lon, label}
+const HOME_LOCATION_FALLBACK = { lat: 39.8283, lon: -98.5795, label: null };
+
+function loadHomeLocation() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(HOME_LOCATION_KEY) || "null");
+    if (parsed && typeof parsed.lat === "number" && typeof parsed.lon === "number") return parsed;
+  } catch (err) {
+    // fall through to the fallback below
+  }
+  return HOME_LOCATION_FALLBACK;
+}
+
+let homeLocation = loadHomeLocation();
+let HOME_LATITUDE = homeLocation.lat;
+let HOME_LONGITUDE = homeLocation.lon;
+
+function saveHomeLocation(lat, lon, label) {
+  homeLocation = { lat, lon, label };
+  localStorage.setItem(HOME_LOCATION_KEY, JSON.stringify(homeLocation));
+  HOME_LATITUDE = lat;
+  HOME_LONGITUDE = lon;
+}
 
 const WEATHER_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 const ALERT_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
@@ -805,6 +829,153 @@ function setupProfileSettings() {
     userName = input.value.trim();
     localStorage.setItem(USER_NAME_KEY, userName);
     renderMorningBriefing();
+  });
+}
+
+// ---------------------------------------------------------------------------
+// First-run Setup Wizard - shown exactly once (gated by SETUP_COMPLETE_KEY),
+// above literally everything else (z-index: 200 in style.css). Collects the
+// handful of things that used to have no good default (name, and
+// especially location - see HOME_LOCATION_KEY near the top of this file)
+// or that are easy to miss buried in Settings on a device you just set up
+// (Companion Server). The normal dashboard still loads underneath it using
+// whatever placeholder location is active until Finish is tapped - harmless
+// since nothing behind the overlay is visible before then.
+// ---------------------------------------------------------------------------
+const SETUP_COMPLETE_KEY = "aurora-dashboard:setup-complete";
+
+let setupSelectedLocation = null; // {lat, lon, label} once a search result is tapped
+
+/** Open-Meteo's geocoding API - same free, keyless, CORS-enabled provider
+ *  already used for weather, so this doesn't introduce a new dependency. */
+async function searchLocations(query) {
+  const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=5&language=en&format=json`;
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error("Search failed.");
+  const data = await resp.json();
+  return (data.results || []).map((r) => ({
+    lat: r.latitude,
+    lon: r.longitude,
+    label: [r.name, r.admin1, r.country].filter(Boolean).join(", "),
+  }));
+}
+
+function renderSetupLocationResults(results) {
+  const container = byId("setup-location-results");
+  if (!container) return;
+  container.innerHTML = "";
+  results.forEach((loc) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "setup-location-result-btn";
+    btn.textContent = loc.label;
+    btn.addEventListener("click", () => {
+      setupSelectedLocation = loc;
+      container.querySelectorAll(".setup-location-result-btn").forEach((b) => b.classList.remove("selected"));
+      btn.classList.add("selected");
+      const hint = byId("setup-location-hint");
+      if (hint) {
+        hint.textContent = "";
+        hint.classList.add("hidden");
+      }
+    });
+    container.appendChild(btn);
+  });
+}
+
+function setupSetupWizardLocationSearch() {
+  const input = byId("setup-location-input");
+  const searchBtn = byId("setup-location-search-btn");
+  const hint = byId("setup-location-hint");
+
+  const showHint = (text) => {
+    if (!hint) return;
+    hint.textContent = text;
+    hint.classList.toggle("hidden", !text);
+  };
+
+  const runSearch = async () => {
+    const query = (input?.value || "").trim();
+    if (!query) return;
+    showHint("Searching...");
+    try {
+      const results = await searchLocations(query);
+      if (results.length === 0) {
+        showHint("No matches - try a different spelling.");
+        renderSetupLocationResults([]);
+        return;
+      }
+      showHint("");
+      renderSetupLocationResults(results);
+    } catch (err) {
+      showHint("Couldn't search right now - check the connection and try again.");
+    }
+  };
+
+  searchBtn?.addEventListener("click", runSearch);
+  input?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") runSearch();
+  });
+}
+
+/** Small helper for the wizard's own clock-format/temp-unit segmented
+ *  controls - deliberately separate from setupClockFormatSetting()/
+ *  setupTempUnitSetting() in Settings, since those write straight to
+ *  localStorage and this needs to hold the choice until Finish is tapped. */
+function setupSetupWizardSegmented(id, attr, defaultValue) {
+  const segmented = byId(id);
+  if (!segmented) return { get: () => defaultValue };
+  let value = defaultValue;
+  const sync = () => {
+    segmented.querySelectorAll(".settings-segment").forEach((b) => {
+      b.classList.toggle("active", b.dataset[attr] === value);
+    });
+  };
+  sync();
+  segmented.addEventListener("click", (event) => {
+    const b = event.target.closest(".settings-segment");
+    if (!b) return;
+    value = b.dataset[attr];
+    sync();
+  });
+  return { get: () => value };
+}
+
+function setupSetupWizard() {
+  const overlay = byId("setup-wizard-overlay");
+  if (!overlay || localStorage.getItem(SETUP_COMPLETE_KEY) === "true") return;
+
+  overlay.classList.remove("hidden");
+  setupSetupWizardLocationSearch();
+
+  const clockFormatControl = setupSetupWizardSegmented("setup-clock-format-segmented", "format", "12h");
+  const tempUnitControl = setupSetupWizardSegmented("setup-temp-unit-segmented", "unit", "F");
+
+  const popup = byId("setup-companion-popup");
+  byId("setup-companion-yes-btn")?.addEventListener("click", () => popup?.classList.remove("hidden"));
+  byId("setup-companion-popup-close-btn")?.addEventListener("click", () => popup?.classList.add("hidden"));
+
+  byId("setup-finish-btn")?.addEventListener("click", () => {
+    if (!setupSelectedLocation) {
+      const hint = byId("setup-location-hint");
+      if (hint) {
+        hint.textContent = "Pick a location from the search results first - weather needs it.";
+        hint.classList.remove("hidden");
+      }
+      byId("setup-location-input")?.focus();
+      return;
+    }
+
+    localStorage.setItem(USER_NAME_KEY, (byId("setup-name-input")?.value || "").trim());
+    saveHomeLocation(setupSelectedLocation.lat, setupSelectedLocation.lon, setupSelectedLocation.label);
+    localStorage.setItem(CLOCK_FORMAT_KEY, clockFormatControl.get());
+    localStorage.setItem(TEMP_UNIT_KEY, tempUnitControl.get());
+    localStorage.setItem(SETUP_COMPLETE_KEY, "true");
+
+    // Reload rather than hot-applying every value - tempUnit/clock24h/
+    // userName/HOME_LATITUDE/HOME_LONGITUDE all only read their storage key
+    // once at load time, same reasoning as the Backup restore flow's reload.
+    location.reload();
   });
 }
 
@@ -5288,17 +5459,17 @@ function setupWakeAlarmRingingControls() {
   byId("alarm-dismiss-btn")?.addEventListener("click", dismissWakeAlarm);
   byId("alarm-snooze-btn")?.addEventListener("click", snoozeWakeAlarm);
 
-  // Tap-ANYTHING-to-snooze - the whole point of a ringing alarm is that
+  // Tap-ANYTHING-to-dismiss - the whole point of a ringing alarm is that
   // you're half-asleep in the dark, exactly the condition under which
-  // aiming for a specific small button is hardest. Dismiss stays a
-  // deliberate, separate tap on its own (much larger, but still distinct)
-  // button, so a stray touch snoozes rather than accidentally killing the
-  // alarm outright. Excludes the dismiss button, snooze button, and
-  // duration picker themselves so this doesn't double-fire alongside
-  // their own click handlers above.
+  // aiming for a specific small button is hardest. Snooze stays a
+  // deliberate, separate tap on its own (still distinct) button, so a
+  // stray touch actually gets you up rather than quietly buying another
+  // 9 minutes. Excludes the dismiss button, snooze button, and duration
+  // picker themselves so this doesn't double-fire alongside their own
+  // click handlers above.
   byId("alarm-ringing-overlay")?.addEventListener("click", (event) => {
     if (event.target.closest("#alarm-dismiss-btn, #alarm-snooze-btn, #alarm-snooze-duration")) return;
-    snoozeWakeAlarm();
+    dismissWakeAlarm();
   });
 }
 
@@ -6485,10 +6656,10 @@ function setupShoppingList() {
 // ---------------------------------------------------------------------------
 // Weather - fetched directly from two free, unauthenticated, CORS-enabled
 // public APIs (Open-Meteo and the National Weather Service) instead of
-// proxied through Aurora, which no longer exists. Same fixed home
-// coordinate Aurora itself used to fall back to (see HOME_LATITUDE/
-// HOME_LONGITUDE at the top of this file) - there's no phone location to
-// follow anymore, so this is the only coordinate this build ever uses.
+// proxied through Aurora, which no longer exists. Uses the home coordinate
+// set by the Setup Wizard (see HOME_LATITUDE/HOME_LONGITUDE at the top of
+// this file) - there's no phone location to follow anymore, so this is the
+// only coordinate this build ever uses.
 // Builds a WeatherSnapshot-shaped object matching exactly what Aurora used
 // to send, so renderWeather()/renderRadar()/renderAirQuality()/
 // renderWeatherDetails()/renderDailyForecast() all still work completely
@@ -8872,6 +9043,7 @@ function setupBackupSettings() {
 // ---------------------------------------------------------------------------
 
 function init() {
+  setupSetupWizard();
   setupPager();
   setupPageScrollEffect();
   setupThemePicker();

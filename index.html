@@ -1296,6 +1296,63 @@
     <div class="night-sky-list" id="night-sky-list"></div>
   </div>
 
+  <div class="setup-wizard-overlay hidden" id="setup-wizard-overlay" role="dialog" aria-label="First-time setup">
+    <div class="setup-wizard-card">
+      <h1 class="setup-wizard-title">Welcome</h1>
+      <p class="setup-wizard-subtitle">A few quick things before this dashboard is ready. All of it can be changed later in Settings.</p>
+
+      <div class="setup-wizard-field">
+        <label class="settings-text-label" for="setup-name-input">Your name (optional)</label>
+        <input type="text" id="setup-name-input" class="settings-text-input" placeholder="What should it call you?" autocomplete="off" />
+      </div>
+
+      <div class="setup-wizard-field">
+        <label class="settings-text-label" for="setup-location-input">Location</label>
+        <div class="settings-text-row">
+          <input type="text" id="setup-location-input" class="settings-text-input" placeholder="City, State or Country" autocomplete="off" />
+          <button class="settings-add-btn" type="button" id="setup-location-search-btn">Search</button>
+        </div>
+        <div class="setup-location-results" id="setup-location-results"></div>
+        <div class="settings-text-hint hidden" id="setup-location-hint"></div>
+      </div>
+
+      <div class="setup-wizard-field">
+        <span class="settings-text-label">Clock format</span>
+        <div class="settings-segmented settings-segmented-inline" id="setup-clock-format-segmented" role="radiogroup" aria-label="Clock format">
+          <button class="settings-segment active" type="button" data-format="12h">12-hour</button>
+          <button class="settings-segment" type="button" data-format="24h">24-hour</button>
+        </div>
+      </div>
+
+      <div class="setup-wizard-field">
+        <span class="settings-text-label">Temperature</span>
+        <div class="settings-segmented settings-segmented-inline" id="setup-temp-unit-segmented" role="radiogroup" aria-label="Temperature unit">
+          <button class="settings-segment active" type="button" data-unit="F">&deg;F</button>
+          <button class="settings-segment" type="button" data-unit="C">&deg;C</button>
+        </div>
+      </div>
+
+      <div class="setup-wizard-field">
+        <span class="settings-text-label">Companion Server</span>
+        <p class="settings-text-hint">An optional server you can run yourself for a better spoken voice, ISS pass alerts, an off-device backup, and a daily generated insight. Skippable - nothing here breaks without it.</p>
+        <div class="setup-wizard-btn-row">
+          <button class="settings-add-btn settings-btn-secondary" type="button" id="setup-companion-yes-btn">Yes, show me how</button>
+          <button class="settings-add-btn settings-btn-secondary" type="button" id="setup-companion-no-btn">No thanks</button>
+        </div>
+      </div>
+
+      <button class="settings-add-btn setup-wizard-finish-btn" type="button" id="setup-finish-btn">Finish Setup</button>
+    </div>
+
+    <div class="setup-companion-popup hidden" id="setup-companion-popup">
+      <div class="setup-companion-popup-card">
+        <p>The Companion Server's source and setup instructions live in this dashboard's own repo.</p>
+        <a href="https://github.com/rustyisacat/echo-dashboard-solo/blob/main/server/README.md" target="_blank" rel="noopener" class="settings-add-btn">Open Setup Instructions</a>
+        <button class="settings-add-btn settings-btn-secondary" type="button" id="setup-companion-popup-close-btn">Close</button>
+      </div>
+    </div>
+  </div>
+
   <script src="script.js"></script>
 </body>
 </html>
