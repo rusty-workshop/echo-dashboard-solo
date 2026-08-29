@@ -4376,6 +4376,14 @@ body.ambient-active .weather-bg {
   white-space: nowrap;
 }
 
+/* Companion Server's generated one-liner - same quiet/italic treatment as
+   the quote above it, since it's also texture rather than a hard fact. */
+.briefing-insight {
+  margin-top: 0.3em;
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+
 /* ---- World Clock ------------------------------------------------------
    An optional Overview tile (off by default - see DEFAULT_TILE_LAYOUT in
    script.js) plus its Settings-page management list. Pure localStorage/

@@ -143,11 +143,12 @@ triple-beep that's easy to miss from another room.
   button (hero panel) or the speaker icon next to the Overview's morning
   briefing card for a short spoken recap — weather, your first Agenda
   item, your next alarm at night; weather, umbrella/jacket heads-up, and
-  today's first event in the morning — read aloud via the browser's own
-  built-in speech synthesis. No network, no cloud voice service, no API
-  key. (Depends on the kiosk browser's WebView actually implementing
-  `speechSynthesis` — both buttons hide themselves rather than doing
-  nothing if it doesn't.)
+  today's first event in the morning. Read aloud via the browser's own
+  built-in `speechSynthesis` by default (no network, no cloud voice
+  service, no API key) — but this kiosk browser's WebView is known to not
+  implement `speechSynthesis` at all, so if a [Companion Server](#companion-server-optional)
+  is configured, its Piper-based TTS is used instead and the buttons stay
+  usable either way; only hidden entirely if neither is available.
 - **Night Sky View, with a real star map**: tap "Night Sky" next to the
   Moon phase (Daily Info page) for which naked-eye planets — Mercury,
   Venus, Mars, Jupiter, Saturn — plus the Moon and ~40 of the brightest
@@ -163,7 +164,11 @@ triple-beep that's easy to miss from another room.
   connection between the weather layer and the astronomy layer — a
   one-line stargazing forecast ("Clear skies tonight" / "Cloudy skies
   tonight") that only speaks up for unambiguous conditions, staying quiet
-  rather than guessing on a partly-cloudy night.
+  rather than guessing on a partly-cloudy night. If a
+  [Companion Server](#companion-server-optional) is configured, also shows
+  the next ISS pass overhead at night ("ISS pass tonight at 9:47 PM, up to
+  61° high") — the one thing this view can't compute offline, since it
+  needs live orbital data.
 - **Ambient Mode**: after a configurable idle timeout with no touch (never
   while Bedside Mode is active), a screensaver-style view takes over —
   huge clock, tiny weather line, dimmed, a twinkling starfield. Any touch
@@ -286,6 +291,37 @@ triple-beep that's easy to miss from another room.
   current) on a fresh install or after a cleared profile. The export list
   itself is built dynamically off whatever keys actually exist rather than
   a hardcoded list, so it never silently misses something new.
+
+### Companion Server (optional)
+
+An optional, entirely opt-in LAN service — source in [`server/`](server/) —
+meant to run on hardware you already control (in this dashboard's case, a
+repurposed old laptop, not a third-party cloud), backing four things this
+kiosk WebView can't do fully on its own. Leave it unconfigured
+(Settings → Companion Server) and none of the following applies; the
+dashboard works exactly as it does without it.
+
+- **Better spoken briefings**: this WebView doesn't implement
+  `window.speechSynthesis` at all, so Bedtime/Good Morning Briefing had no
+  real voice before this existed. The server runs [Piper](https://github.com/rhasspy/piper),
+  an offline neural TTS engine, and hands back a WAV file over the LAN.
+- **ISS pass alerts**: Night Sky View shows the next nighttime pass of the
+  ISS overhead, computed from a periodically-refreshed TLE (via
+  [Celestrak](https://celestrak.org)) and a NOAA-formula sunset/sunrise
+  check — the one thing that view can't do with zero network dependency.
+- **Off-device backup**: Settings → Companion Server can push the exact
+  same backup object the local Export button produces to the server, and
+  restore the latest one back — a second copy that survives a factory
+  reset or a dead browser profile without needing a phone or a manual file
+  transfer.
+- **A generated daily insight line**: a locally-run small language model
+  (via [Ollama](https://ollama.com)) turns today's actual weather, sleep
+  streak, habit streaks, and next Agenda item into one real generated
+  sentence on the Overview, instead of picking from a canned template list
+  like Daily Quote/Word of the Day do.
+
+Every one of these degrades silently to "unavailable" if the server address
+is unset or unreachable — nothing on the dashboard depends on it.
 
 ## Requirements
 

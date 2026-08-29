@@ -2431,6 +2431,130 @@ function renderBedsideTomorrow() {
  *  wakeAlarms) rather than fetching anything new - if weather hasn't
  *  loaded yet, or there's no Agenda item or alarm, that sentence is just
  *  skipped rather than reading a gap or a "null" out loud. */
+// ---------------------------------------------------------------------------
+// Companion Server - an optional LAN-only companion service (source in
+// server/ of this repo, deployed separately on hardware Rusty controls, not
+// a third-party cloud dependency) backing four opt-in features the WebView
+// can't do fully on-device: spoken briefings (this WebView's
+// window.speechSynthesis is confirmed unsupported - see the speaking-check
+// below), ISS pass prediction (needs live TLE data, out of scope for Night
+// Sky View's own offline design), an off-device backup copy, and a
+// generated one-line daily insight. Every one of these quietly does nothing
+// if the server URL is unset or unreachable - nothing here is required for
+// the dashboard to work, matching the rest of the app's degrade-quietly
+// pattern (e.g. the rain-sound hint).
+// ---------------------------------------------------------------------------
+const COMPANION_URL_KEY = "aurora-dashboard:companion-server-url";
+const COMPANION_KEY_KEY = "aurora-dashboard:companion-server-key";
+
+function companionServerConfig() {
+  const url = (localStorage.getItem(COMPANION_URL_KEY) || "").trim().replace(/\/+$/, "");
+  const key = (localStorage.getItem(COMPANION_KEY_KEY) || "").trim();
+  return url ? { url, key } : null;
+}
+
+/** Returns the fetch Response on success, or null on any failure/timeout/
+ *  missing config - callers never need to try/catch, just check truthiness. */
+async function companionFetch(path, options = {}) {
+  const config = companionServerConfig();
+  if (!config) return null;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), options.timeoutMs || 5000);
+  try {
+    const headers = Object.assign({}, options.headers);
+    if (config.key) headers["X-Dashboard-Key"] = config.key;
+    const resp = await fetch(config.url + path, {
+      method: options.method || "GET",
+      headers,
+      body: options.body,
+      signal: controller.signal,
+    });
+    return resp.ok ? resp : null;
+  } catch (err) {
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function companionServerReachable() {
+  const resp = await companionFetch("/health", { timeoutMs: 3000 });
+  return !!resp;
+}
+
+let activeCompanionAudio = null;
+// Nonzero while a companion-server TTS fetch is in flight - activeCompanionAudio
+// alone isn't enough to detect "already speaking" during that window, since it
+// only gets set once the (network + synthesis) round trip finishes, which is
+// slow enough for a real double-tap to land inside it.
+let companionTtsRequestId = 0;
+
+function isBriefingSpeaking() {
+  if (companionTtsRequestId !== 0) return true;
+  if (activeCompanionAudio && !activeCompanionAudio.paused) return true;
+  return typeof window.speechSynthesis !== "undefined" && window.speechSynthesis.speaking;
+}
+
+/** Speaks text via the companion server's TTS if configured and reachable,
+ *  falling back to window.speechSynthesis, falling back to doing nothing.
+ *  A second call while already speaking - including mid-fetch, before any
+ *  audio exists yet - stops it, same "tap again to cancel" idea the buttons
+ *  had before this was generalized. */
+async function speakBriefingText(text, btn) {
+  if (isBriefingSpeaking()) {
+    companionTtsRequestId = 0; // invalidates any in-flight fetch's result, see below
+    if (activeCompanionAudio) {
+      activeCompanionAudio.pause();
+      activeCompanionAudio.currentTime = 0;
+      activeCompanionAudio = null;
+    }
+    if (typeof window.speechSynthesis !== "undefined") window.speechSynthesis.cancel();
+    btn?.classList.remove("speaking");
+    return;
+  }
+
+  const config = companionServerConfig();
+  if (config) {
+    const requestId = ++companionTtsRequestId;
+    btn?.classList.add("speaking");
+    const resp = await companionFetch("/tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+      timeoutMs: 15000,
+    });
+    if (companionTtsRequestId !== requestId) {
+      // Cancelled (or superseded by a newer request) while this one was
+      // still in flight - discard the result, don't touch the button.
+      return;
+    }
+    companionTtsRequestId = 0;
+    if (resp) {
+      const blob = await resp.blob();
+      const audioUrl = URL.createObjectURL(blob);
+      const audio = new Audio(audioUrl);
+      activeCompanionAudio = audio;
+      audio.onended = audio.onerror = () => {
+        btn?.classList.remove("speaking");
+        URL.revokeObjectURL(audioUrl);
+        if (activeCompanionAudio === audio) activeCompanionAudio = null;
+      };
+      audio.play();
+      return;
+    }
+    btn?.classList.remove("speaking");
+    // Falls through to speechSynthesis below if the server call failed.
+  }
+
+  if (typeof window.speechSynthesis === "undefined") return;
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.rate = 0.95;
+  utterance.onstart = () => btn?.classList.add("speaking");
+  utterance.onend = () => btn?.classList.remove("speaking");
+  utterance.onerror = () => btn?.classList.remove("speaking");
+  window.speechSynthesis.speak(utterance);
+}
+
 function buildBedtimeBriefingText() {
   const sentences = [];
 
@@ -2459,34 +2583,17 @@ function buildBedtimeBriefingText() {
   return `Good night. ${sentences.join(" ")} Sleep well.`;
 }
 
-function isBedtimeBriefingSpeaking() {
-  return typeof window.speechSynthesis !== "undefined" && window.speechSynthesis.speaking;
-}
-
-/** A second tap while it's already talking stops it - same "tap again to
- *  cancel" idea as the alarm sound preview button, rather than queuing a
- *  second utterance or being ignored outright. */
 function speakBedtimeBriefing() {
-  if (typeof window.speechSynthesis === "undefined") return;
-  if (isBedtimeBriefingSpeaking()) {
-    window.speechSynthesis.cancel();
-    return;
-  }
-
-  const utterance = new SpeechSynthesisUtterance(buildBedtimeBriefingText());
-  utterance.rate = 0.95;
   const btn = byId("bedtime-briefing-btn");
-  utterance.onstart = () => btn?.classList.add("speaking");
-  utterance.onend = () => btn?.classList.remove("speaking");
-  utterance.onerror = () => btn?.classList.remove("speaking");
-  window.speechSynthesis.speak(utterance);
+  speakBriefingText(buildBedtimeBriefingText(), btn);
 }
 
 function setupBedtimeBriefing() {
   const btn = byId("bedtime-briefing-btn");
-  if (typeof window.speechSynthesis === "undefined") {
-    // No speech synthesis in this WebView - hide the button entirely
-    // rather than leaving a control that silently does nothing.
+  if (typeof window.speechSynthesis === "undefined" && !companionServerConfig()) {
+    // No speech synthesis in this WebView and no companion server configured
+    // - hide the button entirely rather than leaving a control that
+    // silently does nothing.
     btn?.classList.add("hidden");
     return;
   }
@@ -2539,29 +2646,14 @@ function buildMorningBriefingText() {
   return sentences.join(" ");
 }
 
-function isMorningBriefingSpeaking() {
-  return typeof window.speechSynthesis !== "undefined" && window.speechSynthesis.speaking;
-}
-
 function speakMorningBriefing() {
-  if (typeof window.speechSynthesis === "undefined") return;
-  if (isMorningBriefingSpeaking()) {
-    window.speechSynthesis.cancel();
-    return;
-  }
-
-  const utterance = new SpeechSynthesisUtterance(buildMorningBriefingText());
-  utterance.rate = 0.95;
   const btn = byId("morning-briefing-btn");
-  utterance.onstart = () => btn?.classList.add("speaking");
-  utterance.onend = () => btn?.classList.remove("speaking");
-  utterance.onerror = () => btn?.classList.remove("speaking");
-  window.speechSynthesis.speak(utterance);
+  speakBriefingText(buildMorningBriefingText(), btn);
 }
 
 function setupMorningBriefing() {
   const btn = byId("morning-briefing-btn");
-  if (typeof window.speechSynthesis === "undefined") {
+  if (typeof window.speechSynthesis === "undefined" && !companionServerConfig()) {
     btn?.classList.add("hidden");
     return;
   }
@@ -7560,10 +7652,11 @@ function renderNightSkyList(visibleBodies) {
 
 // Annual meteor showers, peak month/day (roughly stable year to year -
 // within about a day of the same calendar date) and typical peak hourly
-// rate under dark skies. Deliberately excludes ISS passes - those need
-// live orbital data over the network, which would break this view's
-// "no backend, works offline" design, unlike a shower's peak date, which
-// is a fixed, well-documented annual event safe to hardcode.
+// rate under dark skies. A shower's peak date is a fixed, well-documented
+// annual event safe to hardcode - unlike ISS passes (see
+// refreshIssPassHint() below), which need live orbital data and are
+// deliberately kept as a separate, opt-in Companion Server call rather than
+// baked into this otherwise fully offline table.
 const METEOR_SHOWERS = [
   { name: "Quadrantids", month: 1, day: 3, rate: 80 },
   { name: "Lyrids", month: 4, day: 22, rate: 18 },
@@ -7601,6 +7694,52 @@ function stargazingForecastText(weather) {
   return "";
 }
 
+// ISS pass prediction - the one thing METEOR_SHOWERS' comment above flags as
+// needing live orbital data (TLE), which this view otherwise deliberately
+// avoids. The Companion Server fetches/caches the TLE and does the pass
+// math (see server/server.py's find_iss_passes()); the dashboard only ever
+// asks for a computed list and caches it locally for a few hours so
+// re-opening Night Sky View repeatedly doesn't hit the server every time.
+const ISS_PASSES_CACHE_KEY = "aurora-dashboard:iss-passes-cache";
+const ISS_PASSES_CACHE_MAX_AGE_MS = 3 * 3600 * 1000;
+
+function hhmmFromDate(date) {
+  return `${date.getHours()}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+function nextIssPassText(passes) {
+  const now = new Date();
+  const next = (passes || []).find((p) => new Date(p.set) > now);
+  if (!next) return "";
+  const rise = new Date(next.rise);
+  const sameDay = localDateKey(rise) === localDateKey(now);
+  const dayLabel = sameDay ? "tonight" : "tomorrow night";
+  return `ISS pass ${dayLabel} at ${formatTimeOfDay(hhmmFromDate(rise))}, up to ${Math.round(next.max_elevation)}° high.`;
+}
+
+async function refreshIssPassHint() {
+  const hint = byId("night-sky-iss-hint");
+  if (!hint || !companionServerConfig()) return;
+
+  const cached = JSON.parse(localStorage.getItem(ISS_PASSES_CACHE_KEY) || "null");
+  let passes = cached && Date.now() - cached.fetchedAt < ISS_PASSES_CACHE_MAX_AGE_MS ? cached.passes : null;
+
+  if (!passes) {
+    const resp = await companionFetch(
+      `/iss-passes?lat=${HOME_LATITUDE}&lon=${HOME_LONGITUDE}&hours=72`,
+      { timeoutMs: 10000 }
+    );
+    if (!resp) return;
+    const data = await resp.json();
+    passes = data.passes || [];
+    localStorage.setItem(ISS_PASSES_CACHE_KEY, JSON.stringify({ fetchedAt: Date.now(), passes }));
+  }
+
+  const text = nextIssPassText(passes);
+  hint.textContent = text;
+  hint.classList.toggle("hidden", !text);
+}
+
 function renderNightSkyView() {
   const now = new Date();
   renderMoonPhaseVisual("moon-visual-nightsky", now);
@@ -7633,6 +7772,7 @@ function renderNightSkyView() {
 
 function enterNightSkyView() {
   renderNightSkyView();
+  refreshIssPassHint();
   byId("night-sky-overlay")?.classList.remove("hidden");
 }
 
@@ -7740,6 +7880,81 @@ function renderWordOfTheDay() {
 
 function setupWordOfTheDay() {
   renderWordOfTheDay();
+}
+
+// ---------------------------------------------------------------------------
+// Dynamic Insight - a one-sentence, non-templated summary of today generated
+// by the Companion Server's local Ollama model from whatever's already
+// loaded (weather, sleep streak, habit streaks, next Agenda item). Cached
+// per calendar day in localStorage, same "generate once, not per page-view"
+// idea as Daily Quote/Trivia/Puzzle, since a generation costs a few seconds
+// of the server's CPU. Silently stays hidden if no server is configured or
+// the request fails - this is a pure upgrade over the templated briefing
+// lines above it, never a requirement.
+// ---------------------------------------------------------------------------
+const DYNAMIC_INSIGHT_KEY = "aurora-dashboard:dynamic-insight";
+
+function dynamicInsightFacts() {
+  const facts = {};
+
+  const weather = lastWeatherData;
+  if (weather) {
+    facts.weather = `${weather.condition}, currently ${displayTemp(weather.temperature)}, high ${displayTemp(weather.high)}${weather.low != null ? `, low ${displayTemp(weather.low)}` : ""}`;
+  }
+
+  const sleepStreak = computeSleepStreak(sleepMinutesByDate());
+  const lastNightMinutes = sleepMinutesByDate().get(localDateKey(new Date(Date.now() - 86400000)));
+  if (sleepStreak > 0 || lastNightMinutes) {
+    facts.sleep = `streak ${sleepStreak} night${sleepStreak === 1 ? "" : "s"}${lastNightMinutes ? `, last night ${(lastNightMinutes / 60).toFixed(1)}h` : ""}`;
+  }
+
+  const habitSummaries = habits
+    .map((h) => ({ label: h.label, streak: habitStreak(h.id) }))
+    .filter((h) => h.streak > 0)
+    .sort((a, b) => b.streak - a.streak)
+    .slice(0, 2)
+    .map((h) => `${h.label} (${h.streak}-day streak)`);
+  if (habitSummaries.length > 0) facts.habits = habitSummaries.join(", ");
+
+  const firstEvent = agendaEntriesForDate(localDateKey(new Date()))[0];
+  if (firstEvent) {
+    facts.calendar = firstEvent.title + (firstEvent.time ? ` at ${formatTimeOfDay(firstEvent.time)}` : "");
+  }
+
+  return facts;
+}
+
+async function refreshDynamicInsight() {
+  if (!companionServerConfig()) return;
+  const todayKey = localDateKey(new Date());
+  const cached = JSON.parse(localStorage.getItem(DYNAMIC_INSIGHT_KEY) || "null");
+  if (cached && cached.date === todayKey) {
+    renderDynamicInsight(cached.text);
+    return;
+  }
+
+  const resp = await companionFetch("/insight", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(dynamicInsightFacts()),
+    timeoutMs: 20000,
+  });
+  if (!resp) return;
+  const { text } = await resp.json();
+  if (!text) return;
+  localStorage.setItem(DYNAMIC_INSIGHT_KEY, JSON.stringify({ date: todayKey, text }));
+  renderDynamicInsight(text);
+}
+
+function renderDynamicInsight(text) {
+  const el = byId("briefing-insight");
+  if (!el) return;
+  setText("briefing-insight", text);
+  el.classList.toggle("hidden", !text);
+}
+
+function setupDynamicInsight() {
+  refreshDynamicInsight();
 }
 
 // ---------------------------------------------------------------------------
@@ -8450,7 +8665,7 @@ function collectBackupLocalStorage() {
   return entries;
 }
 
-async function exportBackup() {
+async function buildBackupObject() {
   const [soundRecords, photoRecords] = await Promise.all([
     loadAllCustomSoundRecords().catch(() => []),
     loadAllWallpaperRecords().catch(() => []),
@@ -8472,14 +8687,17 @@ async function exportBackup() {
     }))
   );
 
-  const backup = {
+  return {
     version: BACKUP_VERSION,
     exportedAt: new Date().toISOString(),
     localStorage: collectBackupLocalStorage(),
     customSounds: customSoundsData,
     wallpaperPhotos: wallpaperPhotosData,
   };
+}
 
+async function exportBackup() {
+  const backup = await buildBackupObject();
   const blob = new Blob([JSON.stringify(backup)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -8498,12 +8716,11 @@ async function exportBackup() {
  *  trying to hot-reload the dozens of module-level variables each section
  *  of this file initializes once from storage at load time - a fresh load
  *  is the only way to guarantee every one of them picks up the restored
- *  values. */
-async function importBackup(file) {
-  const text = await file.text();
-  const backup = JSON.parse(text);
+ *  values. Shared by both the local file-based restore and the Companion
+ *  Server restore below - only how `backup` is obtained differs. */
+async function restoreBackupObject(backup) {
   if (!backup || typeof backup !== "object" || !backup.localStorage) {
-    throw new Error("That doesn't look like a dashboard backup file.");
+    throw new Error("That doesn't look like a dashboard backup.");
   }
 
   for (const key of Object.keys(localStorage)) {
@@ -8530,6 +8747,91 @@ async function importBackup(file) {
     const blob = base64ToBlob(entry.dataUrl, entry.mimeType);
     await saveWallpaperRecord(entry.id, blob);
   }
+}
+
+async function importBackup(file) {
+  const text = await file.text();
+  await restoreBackupObject(JSON.parse(text));
+}
+
+// ---------------------------------------------------------------------------
+// Companion Server backup - the same backup object as the local Export/
+// Import above, just sent to/fetched from the LAN server instead of a
+// downloaded file, so there's an off-device copy without needing a phone or
+// a manual file transfer. Purely opt-in - see setupCompanionServerSettings()
+// for the Settings UI and companionServerConfig() for how it's configured.
+// ---------------------------------------------------------------------------
+
+async function backupToCompanionServer() {
+  if (!companionServerConfig()) throw new Error("Companion Server isn't configured.");
+  const backup = await buildBackupObject();
+  const resp = await companionFetch("/backup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(backup),
+    timeoutMs: 20000,
+  });
+  if (!resp) throw new Error("Couldn't reach the Companion Server.");
+}
+
+async function restoreFromCompanionServer() {
+  if (!companionServerConfig()) throw new Error("Companion Server isn't configured.");
+  const resp = await companionFetch("/backup/latest", { timeoutMs: 10000 });
+  if (!resp) throw new Error("Couldn't reach the Companion Server, or no backup exists yet.");
+  await restoreBackupObject(await resp.json());
+}
+
+function setupCompanionServerSettings() {
+  const urlInput = byId("companion-server-url-input");
+  const keyInput = byId("companion-server-key-input");
+  const hint = byId("companion-server-hint");
+  const backupHint = byId("companion-server-backup-hint");
+
+  const showHint = (el, text) => {
+    if (!el) return;
+    el.textContent = text;
+    el.classList.toggle("hidden", !text);
+  };
+
+  if (urlInput) urlInput.value = localStorage.getItem(COMPANION_URL_KEY) || "";
+  if (keyInput) keyInput.value = localStorage.getItem(COMPANION_KEY_KEY) || "";
+
+  byId("companion-server-save-btn")?.addEventListener("click", async () => {
+    localStorage.setItem(COMPANION_URL_KEY, (urlInput?.value || "").trim());
+    localStorage.setItem(COMPANION_KEY_KEY, (keyInput?.value || "").trim());
+    showHint(hint, "Checking connection...");
+    const reachable = await companionServerReachable();
+    showHint(
+      hint,
+      reachable
+        ? "Connected. Reload the dashboard for every feature to pick it up."
+        : "Saved, but couldn't reach it - double check the address and that the server is running."
+    );
+  });
+
+  byId("companion-server-backup-btn")?.addEventListener("click", async () => {
+    showHint(backupHint, "Backing up...");
+    try {
+      await backupToCompanionServer();
+      showHint(backupHint, "Backed up just now.");
+    } catch (err) {
+      showHint(backupHint, err.message);
+    }
+  });
+
+  byId("companion-server-restore-btn")?.addEventListener("click", async () => {
+    if (!confirm("Restoring replaces every current setting, sound, and wallpaper photo with the server's latest backup. Continue?")) {
+      return;
+    }
+    showHint(backupHint, "Restoring...");
+    try {
+      await restoreFromCompanionServer();
+      showHint(backupHint, "Restored - reloading...");
+      setTimeout(() => location.reload(), 800);
+    } catch (err) {
+      showHint(backupHint, err.message);
+    }
+  });
 }
 
 function setupBackupSettings() {
@@ -8619,6 +8921,8 @@ function init() {
   setupSleepInsightsPage();
   setupDailyQuote();
   setupWordOfTheDay();
+  setupDynamicInsight();
+  setupCompanionServerSettings();
   setupBackupSettings();
   loadTodayInHistory();
 

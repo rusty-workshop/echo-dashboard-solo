@@ -158,6 +158,7 @@
           <p class="briefing-line" id="briefing-summary"></p>
           <p class="briefing-line briefing-quote" id="briefing-quote"></p>
           <p class="briefing-line briefing-word" id="briefing-word"></p>
+          <p class="briefing-line briefing-insight hidden" id="briefing-insight"></p>
         </div>
 
         <div class="status-line" id="status-line">
@@ -888,6 +889,24 @@
       </div>
 
       <div class="settings-section">
+        <h2 class="settings-title">Companion Server</h2>
+        <div class="settings-text-hint">Optional - point this at the small server described in this repo's server/ folder, running on hardware you control on your own network, for a few extras this WebView can't do alone: spoken briefings, ISS pass alerts, an off-device backup copy, and a generated daily insight line. Leave blank and none of this changes.</div>
+        <div class="settings-text-row">
+          <span class="settings-text-label">Server address</span>
+          <input type="text" id="companion-server-url-input" class="settings-text-input" placeholder="http://192.168.1.x:8420" autocomplete="off" aria-label="Companion server address" />
+        </div>
+        <div class="settings-text-row">
+          <span class="settings-text-label">Server key</span>
+          <input type="text" id="companion-server-key-input" class="settings-text-input" placeholder="(optional shared key)" autocomplete="off" aria-label="Companion server shared key" />
+        </div>
+        <button class="settings-add-btn" type="button" id="companion-server-save-btn">Save &amp; Test</button>
+        <div class="settings-text-hint hidden" id="companion-server-hint"></div>
+        <button class="settings-add-btn settings-btn-secondary" type="button" id="companion-server-backup-btn">Back Up to Server Now</button>
+        <button class="settings-add-btn settings-btn-secondary" type="button" id="companion-server-restore-btn">Restore Latest from Server</button>
+        <div class="settings-text-hint hidden" id="companion-server-backup-hint"></div>
+      </div>
+
+      <div class="settings-section">
         <h2 class="settings-title">Theme</h2>
         <div class="theme-grid" id="theme-grid">
           <button class="theme-swatch" data-theme-value="default" aria-label="Default theme">
@@ -1270,6 +1289,7 @@
     </div>
     <div class="night-sky-stargazing hidden" id="night-sky-stargazing"></div>
     <div class="night-sky-meteor-hint hidden" id="night-sky-meteor-hint"></div>
+    <div class="night-sky-meteor-hint hidden" id="night-sky-iss-hint"></div>
     <div class="night-sky-chart-wrap">
       <svg class="night-sky-chart" id="night-sky-chart" viewBox="0 0 360 150" preserveAspectRatio="xMidYMid meet" aria-hidden="true"></svg>
     </div>
