@@ -5832,6 +5832,22 @@ html[data-theme="gruvbox"]::before {
   font-weight: 700;
 }
 
+/* .settings-text-input defaults to text-align:right, correct for the
+   label+value rows it was designed for elsewhere in Settings, but wrong
+   for these freeform fields (typed name, typed search query) where
+   left-aligned reads naturally instead. Also needs an explicit width,
+   since outside a .settings-text-row flex row its `flex: 1` has no effect
+   and it'd otherwise fall back to the browser's default ~20-character
+   input width. */
+.setup-wizard-field > .settings-text-input {
+  width: 100%;
+  text-align: left;
+}
+
+.setup-wizard-field .settings-text-row .settings-text-input {
+  text-align: left;
+}
+
 .setup-location-results {
   display: flex;
   flex-direction: column;
