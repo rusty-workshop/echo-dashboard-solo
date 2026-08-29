@@ -1534,8 +1534,76 @@ function renderSleepTrend(byDate) {
     .join("");
 }
 
+// ---------------------------------------------------------------------------
+// Week in Review - a bigger-picture, once-a-week cousin of the daily
+// insight (see generate_week_in_review() in server.py, which computes the
+// actual week-over-week comparison in Python before ever asking the model
+// to write about it). Cached per ISO week, same "generate once, not every
+// visit" idea as Weekly Reflection - reuses that same currentIsoWeekKey().
+// ---------------------------------------------------------------------------
+const WEEK_IN_REVIEW_KEY = "aurora-dashboard:week-in-review";
+
+function openWeekReview() {
+  byId("week-review-popover")?.classList.remove("hidden");
+  byId("week-review-backdrop")?.classList.remove("hidden");
+}
+
+function closeWeekReview() {
+  byId("week-review-popover")?.classList.add("hidden");
+  byId("week-review-backdrop")?.classList.add("hidden");
+}
+
+/** Shows the cached review instantly (opens straight to the popover) if
+ *  one already exists for this ISO week; only actually hits the server -
+ *  and only then shows the popover - when there isn't one yet. */
+async function generateWeekInReview() {
+  if (!companionServerConfig()) return;
+  const textEl = byId("week-review-popover-text");
+  const thisWeek = currentIsoWeekKey(new Date());
+  const cached = JSON.parse(localStorage.getItem(WEEK_IN_REVIEW_KEY) || "null");
+  if (cached && cached.week === thisWeek) {
+    if (textEl) textEl.textContent = cached.text;
+    openWeekReview();
+    return;
+  }
+
+  const btn = byId("week-in-review-btn");
+  const originalLabel = btn?.textContent;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Reviewing...";
+  }
+  const resp = await companionFetch("/week-in-review", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sleepHistory: recentSleepHistoryForServer(),
+      habitCompletionByDate: recentHabitCompletionByDateForServer(),
+    }),
+    timeoutMs: 30000,
+  });
+  if (btn) {
+    btn.disabled = false;
+    btn.textContent = originalLabel;
+  }
+  if (!resp) return;
+  const data = await resp.json();
+  if (!data.text) return;
+  localStorage.setItem(WEEK_IN_REVIEW_KEY, JSON.stringify({ week: thisWeek, text: data.text }));
+  if (textEl) textEl.textContent = data.text;
+  openWeekReview();
+}
+
+function setupWeekInReview() {
+  byId("week-in-review-btn")?.classList.toggle("hidden", !companionServerConfig());
+  byId("week-in-review-btn")?.addEventListener("click", generateWeekInReview);
+  byId("week-review-close")?.addEventListener("click", closeWeekReview);
+  byId("week-review-backdrop")?.addEventListener("click", closeWeekReview);
+}
+
 function setupSleepInsightsPage() {
   setIcon("sleep-page-title-icon", "moon");
+  setupWeekInReview();
   byId("see-sleep-insights-btn")?.addEventListener("click", () => {
     byId("page-sleep")?.scrollIntoView({ behavior: "smooth", inline: "start", block: "nearest" });
   });
@@ -4894,6 +4962,48 @@ async function applyMixerPreset(preset) {
   }
 }
 
+/** Fetches soundIds/volumes for a typed mood from the Companion Server
+ *  (see generate_soundscape() in server.py, which only ever picks from the
+ *  real SOUND_LIBRARY ids) and applies it via the exact same
+ *  applyMixerPreset() a saved Blend uses - padded/truncated to
+ *  MIXER_LAYER_COUNT first, since the model may return fewer than 4. */
+async function requestMoodSoundscape() {
+  const input = byId("mixer-mood-input");
+  const btn = byId("mixer-mood-btn");
+  const mood = input?.value.trim();
+  if (!mood) return;
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Thinking...";
+  }
+  const resp = await companionFetch("/soundscape-mood", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mood }),
+    timeoutMs: 30000,
+  });
+  if (btn) {
+    btn.disabled = false;
+    btn.textContent = "Set Mood";
+  }
+  if (!resp) return;
+
+  const data = await resp.json();
+  const layers = (data.layers || []).slice(0, MIXER_LAYER_COUNT);
+  while (layers.length < MIXER_LAYER_COUNT) layers.push({ soundId: "", volumePercent: 50 });
+  await applyMixerPreset({ layers });
+}
+
+function setupMoodSoundscape() {
+  if (!companionServerConfig()) return; // stays hidden - no server, no mood matching
+  byId("mixer-mood-row")?.classList.remove("hidden");
+  byId("mixer-mood-btn")?.addEventListener("click", requestMoodSoundscape);
+  byId("mixer-mood-input")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") requestMoodSoundscape();
+  });
+}
+
 function setupSoundscapeMixer() {
   for (let i = 0; i < MIXER_LAYER_COUNT; i++) {
     const picker = byId(`mixer-layer-picker-${i}`);
@@ -4953,6 +5063,8 @@ function setupSoundscapeMixer() {
     const preset = mixerPresets.find((p) => p.id === chip.dataset.id);
     if (preset) applyMixerPreset(preset);
   });
+
+  setupMoodSoundscape();
 
   const segmented = byId("sound-mode-segmented");
   segmented?.addEventListener("click", (event) => {
@@ -8355,13 +8467,24 @@ function dynamicInsightFacts() {
   // correlation math (see compute_trend_fact() in server.py) since a 1B
   // local model is unreliable at arithmetic, and folds any real finding
   // back into the same one-sentence insight rather than a separate stat.
-  facts.sleepHistory = [...sleepMinutesByDate().entries()].map(([date, minutes]) => ({ date, minutes }));
-  facts.habitCompletionByDate = Array.from({ length: 60 }, (_, i) => {
+  facts.sleepHistory = recentSleepHistoryForServer();
+  facts.habitCompletionByDate = recentHabitCompletionByDateForServer();
+
+  return facts;
+}
+
+/** Shared by dynamicInsightFacts() above and generateWeekInReview() below -
+ *  every Companion Server endpoint that reasons about sleep/habit history
+ *  wants the same raw shape, computed the same way. */
+function recentSleepHistoryForServer() {
+  return [...sleepMinutesByDate().entries()].map(([date, minutes]) => ({ date, minutes }));
+}
+
+function recentHabitCompletionByDateForServer(days = 60) {
+  return Array.from({ length: days }, (_, i) => {
     const dateKey = localDateKey(new Date(Date.now() - i * 86400000));
     return { date: dateKey, completed: habits.some((h) => (habitLog[h.id] || []).includes(dateKey)) };
   });
-
-  return facts;
 }
 
 async function refreshDynamicInsight() {
@@ -9223,6 +9346,7 @@ function setupExtrasPage() {
   setupWordPuzzle();
   setupDailyTrivia();
   setupDailyPuzzle();
+  setupAskExtras();
 
   const segmented = byId("extras-mode-segmented");
   segmented?.addEventListener("click", (event) => {
@@ -9233,6 +9357,51 @@ function setupExtrasPage() {
     byId("wordpuzzle-view")?.classList.toggle("hidden", btn.dataset.mode !== "wordpuzzle");
     byId("trivia-view")?.classList.toggle("hidden", btn.dataset.mode !== "trivia");
     byId("puzzle-view")?.classList.toggle("hidden", btn.dataset.mode !== "puzzle");
+    byId("ask-view")?.classList.toggle("hidden", btn.dataset.mode !== "ask");
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Ask the Dashboard - free-text Q&A via the Companion Server's local model
+// (see generate_answer() in server.py). The one open-ended feature among
+// Extras' generated content - no caching, no daily limit, just a plain
+// question/answer exchange each time it's tapped.
+// ---------------------------------------------------------------------------
+async function submitAskQuestion() {
+  const input = byId("ask-question-input");
+  const answerEl = byId("ask-answer-text");
+  const btn = byId("ask-submit-btn");
+  const question = input?.value.trim();
+  if (!question) return;
+
+  if (btn) btn.disabled = true;
+  if (answerEl) {
+    answerEl.textContent = "Thinking...";
+    answerEl.classList.remove("hidden");
+  }
+
+  const resp = await companionFetch("/ask", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question }),
+    timeoutMs: 30000,
+  });
+  if (btn) btn.disabled = false;
+  if (!resp) {
+    if (answerEl) answerEl.textContent = "Couldn't reach the Companion Server.";
+    return;
+  }
+  const data = await resp.json();
+  if (answerEl) answerEl.textContent = data.text || "No answer came back.";
+}
+
+function setupAskExtras() {
+  if (!companionServerConfig()) return; // segment stays hidden - no server, no Q&A
+  setIcon("ask-title-icon", "sparkle");
+  byId("extras-ask-segment")?.classList.remove("hidden");
+  byId("ask-submit-btn")?.addEventListener("click", submitAskQuestion);
+  byId("ask-question-input")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") submitAskQuestion();
   });
 }
 

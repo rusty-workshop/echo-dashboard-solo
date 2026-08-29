@@ -522,6 +522,10 @@
             <input type="text" id="mixer-preset-name-input" class="settings-text-input" placeholder="Blend name…" maxlength="30" autocomplete="off" aria-label="Blend name" />
             <button class="settings-add-btn" type="button" id="mixer-save-preset-btn">Save Blend</button>
           </div>
+          <div class="mixer-save-row hidden" id="mixer-mood-row">
+            <input type="text" id="mixer-mood-input" class="settings-text-input" placeholder="Describe a mood…" maxlength="80" autocomplete="off" aria-label="Describe a mood for the soundscape" />
+            <button class="settings-add-btn settings-btn-secondary" type="button" id="mixer-mood-btn">Set Mood</button>
+          </div>
         </div>
       </section>
     </section>
@@ -610,6 +614,7 @@
 
       <div class="sleep-insight hidden" id="sleep-goal-insight"></div>
       <div class="sleep-insight hidden" id="sleep-bedtime-insight"></div>
+      <button class="alarm-action-btn timer-secondary-btn hidden" id="week-in-review-btn" type="button">Week in Review</button>
 
       <div class="settings-section">
         <h2 class="settings-title">Last 7 Days</h2>
@@ -1009,6 +1014,7 @@
         <button class="settings-segment" type="button" data-mode="wordpuzzle">Word Game</button>
         <button class="settings-segment" type="button" data-mode="trivia">Trivia</button>
         <button class="settings-segment" type="button" data-mode="puzzle">Puzzle</button>
+        <button class="settings-segment hidden" type="button" data-mode="ask" id="extras-ask-segment">Ask</button>
       </div>
 
       <div class="journal-view" id="journal-view">
@@ -1073,6 +1079,19 @@
         <div class="puzzle-options" id="puzzle-options"></div>
         <div class="puzzle-feedback hidden" id="puzzle-feedback"></div>
       </div>
+
+      <div class="ask-view hidden" id="ask-view">
+        <h2 class="card-title">
+          <span class="icon-slot small" id="ask-title-icon" aria-hidden="true"></span>
+          Ask the Dashboard
+        </h2>
+        <div class="settings-text-hint">Quick questions, answered by a local model on your Companion Server - not fact-checked, treat it as a starting point.</div>
+        <div class="wordpuzzle-row">
+          <input type="text" id="ask-question-input" class="settings-text-input" placeholder="Ask something…" maxlength="200" autocomplete="off" aria-label="Question for the dashboard" />
+          <button class="alarm-action-btn" id="ask-submit-btn" type="button">Ask</button>
+        </div>
+        <div class="settings-text-hint hidden" id="ask-answer-text"></div>
+      </div>
     </section>
   </div>
 
@@ -1106,6 +1125,21 @@
       <button class="settings-add-btn" type="button" id="agenda-add-btn">Add</button>
     </div>
     <div class="week-view-days" id="week-view-days"></div>
+  </div>
+
+  <!-- Week in Review - a generated paragraph (see /week-in-review in
+       server.py), opened from the Sleep Insights page's own button. A
+       popover rather than inline page content since a full paragraph
+       doesn't reliably fit this dashboard's fixed-height pages alongside
+       everything else already on Sleep Insights - confirmed by measuring
+       real overflow (554px of content in a 480px page) with it inline. -->
+  <div class="week-view-backdrop hidden" id="week-review-backdrop"></div>
+  <div class="week-view-popover hidden" id="week-review-popover">
+    <div class="sticky-note-editor-header">
+      <span class="sticky-note-editor-title">Week in Review</span>
+      <button class="sticky-note-editor-close" id="week-review-close" type="button" aria-label="Close">&times;</button>
+    </div>
+    <div class="sleep-insight" id="week-review-popover-text"></div>
   </div>
 
   <!-- Journal History - past entries only, read-only (see setupJournalHistory()

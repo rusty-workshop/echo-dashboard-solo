@@ -228,6 +228,9 @@ curl -s -X POST $BASE/trivia -H "X-Dashboard-Key: $KEY"
 curl -s -X POST $BASE/puzzle -H "X-Dashboard-Key: $KEY"
 curl -s -X POST $BASE/meal-idea -H "X-Dashboard-Key: $KEY" -d '{"items":["chicken","rice"]}'
 curl -s $BASE/discord-inbox -H "X-Dashboard-Key: $KEY"
+curl -s -X POST $BASE/ask -H "X-Dashboard-Key: $KEY" -d '{"question":"what year did the Titanic sink?"}'
+curl -s -X POST $BASE/soundscape-mood -H "X-Dashboard-Key: $KEY" -d '{"mood":"cozy rainy evening"}'
+curl -s -X POST $BASE/week-in-review -H "X-Dashboard-Key: $KEY" -d '{"sleepHistory":[],"habitCompletionByDate":[]}'
 ```
 
 ## Passwordless sudo on this box

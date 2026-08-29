@@ -31,6 +31,11 @@ offline/on-device:
                                consumes (clears) the queue on each read, so
                                only ever returns what arrived since the last
                                poll
+  POST /ask                   body: {"question": "..."} -> {"text": "..."}
+  POST /soundscape-mood      body: {"mood": "..."}
+                             -> {"layers": [{"soundId","volumePercent"}, ...]}
+  POST /week-in-review        body: {sleepHistory?, habitCompletionByDate?}
+                             -> {"text": "..."}
 
 Everything is stdlib-only except skyfield (ISS passes), Pillow (wallpaper
 processing), the Piper TTS binary (piper/piper/piper) + a voice model
@@ -47,13 +52,17 @@ can and sometimes will get wrong. Its output is validated for shape (both
 fields present) before being returned, never for factual correctness -
 treat it as a fun supplement, not an authoritative source.
 
-/puzzle ("odd one out" generation) is a harder compositional task - hold
-4 items and a category relationship in mind at once - that the 1B model
-failed constantly (its named "odd" word frequently didn't even match one
-of the 4 it had just generated). It runs on qwen2.5:3b-instruct instead
-(OLLAMA_PUZZLE_MODEL), which got this right reliably in testing; slower
-per call (a few seconds to ~15s including a model-swap reload) but that's
-fine for something the dashboard generates once per day and caches.
+/puzzle ("odd one out" generation) and /soundscape-mood (picking sounds
+that actually fit a described scene, not just structurally valid ones)
+both need more actual judgment than the 1B model reliably gives - puzzle's
+named "odd" word frequently didn't even match one of the 4 it had just
+generated, and soundscape-mood kept picking poorly-matched sounds (a loud
+"chime" for a cozy rainy evening, nothing for "camping" beyond generic
+noise). Both run on qwen2.5:3b-instruct instead (OLLAMA_STRONG_MODEL),
+which did noticeably better in testing; slower per call (a few seconds to
+~15s including a model-swap reload) but that's fine for something
+generated once per day/request and not blocking anything tap-and-wait
+like TTS or the daily insight, which stay on the fast 1B model.
 """
 import hashlib
 import json
@@ -81,13 +90,11 @@ PORT = int(os.environ.get("DASHBOARD_SERVER_PORT", "8420"))
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 OLLAMA_MODEL = os.environ.get("DASHBOARD_OLLAMA_MODEL", "llama3.2:1b")
-# Odd-one-out puzzle generation needs to actually hold 4 items + a category
-# relationship in mind at once - llama3.2:1b failed this constantly (its
-# named "odd" word frequently didn't even match one of the 4 it had just
-# generated). qwen2.5:3b-instruct got it right 3/3 in testing, ~3-15s per
-# generation - fine for something cached once/day, not fine for anything
-# tap-and-wait like TTS or the daily insight, which stay on the 1B model.
-OLLAMA_PUZZLE_MODEL = os.environ.get("DASHBOARD_PUZZLE_MODEL", "qwen2.5:3b-instruct")
+# Used for tasks that need real judgment, not just valid structure - see
+# the module docstring above. Env var name kept as DASHBOARD_PUZZLE_MODEL
+# (predates soundscape-mood using it too) rather than renamed and requiring
+# an env file update on the server for no functional difference.
+OLLAMA_STRONG_MODEL = os.environ.get("DASHBOARD_PUZZLE_MODEL", "qwen2.5:3b-instruct")
 
 PIPER_BIN = BASE / "piper" / "piper" / "piper"
 PIPER_MODEL = Path(
@@ -458,7 +465,7 @@ def generate_puzzle():
         "REASON: A dolphin is a mammal - the rest are fish.\n\n"
         "Now create a new, different puzzle:"
     )
-    text = call_ollama(prompt, num_predict=200, temperature=0.9, model=OLLAMA_PUZZLE_MODEL, timeout=60)
+    text = call_ollama(prompt, num_predict=200, temperature=0.9, model=OLLAMA_STRONG_MODEL, timeout=60)
     options_line, odd_word, reason = parse_field(text, "OPTIONS"), parse_field(text, "ODD"), parse_field(text, "REASON")
     if not options_line or not odd_word or not reason:
         raise ValueError("malformed puzzle response")
@@ -531,6 +538,161 @@ def generate_meal_idea(items):
     text = text.strip().strip("\"")
     if not text:
         raise ValueError("empty meal idea")
+    return text
+
+
+# ---------------------------------------------------------------------------
+# Ask the Dashboard - general free-text Q&A, the one open-ended feature
+# here rather than a specific generated content type. Same factual-
+# accuracy caveat as /trivia (small local model, can be confidently wrong)
+# - the prompt asks it to hedge rather than guess, but treat answers as a
+# starting point, not gospel.
+# ---------------------------------------------------------------------------
+
+def generate_answer(question):
+    if not question or not question.strip():
+        raise ValueError("no question provided")
+    prompt = (
+        "Answer this question concisely (2-4 sentences), in plain text with no "
+        "markdown formatting. If you aren't confident of the answer, say so briefly "
+        f"rather than guessing.\n\nQuestion: {question.strip()}\n\nAnswer:"
+    )
+    text = call_ollama(prompt, num_predict=200, temperature=0.5, timeout=30)
+    text = text.strip()
+    if not text:
+        raise ValueError("empty answer")
+    return text
+
+
+# ---------------------------------------------------------------------------
+# Mood-to-soundscape - picks Soundscape Mixer layers/volumes from a typed
+# description, instead of manually tuning four sliders. The model is only
+# ever allowed to pick from SOUND_LIBRARY_IDS (the exact ids the dashboard's
+# own SOUND_LIBRARY in script.js already knows how to play) and a plain
+# "id: volume" line format, same "small models are unreliable at strict
+# JSON, line-based is far more reliable" lesson as /trivia and /puzzle.
+# ---------------------------------------------------------------------------
+
+SOUND_LIBRARY_IDS = [
+    "whitenoise", "pinknoise", "brownnoise", "rain", "ocean",
+    "thunderstorm", "fireplace", "fan", "chime",
+]
+
+
+def generate_soundscape(mood):
+    if not mood or not mood.strip():
+        raise ValueError("no mood provided")
+    ids_list = ", ".join(SOUND_LIBRARY_IDS)
+    prompt = (
+        f"Available ambient sounds: {ids_list}.\n"
+        f'Someone wants a soundscape for this mood/scene: "{mood.strip()}"\n'
+        "Pick up to 4 of the available sounds (fewer is fine if that suits it better) "
+        "and a volume from 0-100 for each. Respond with one sound per line, in this "
+        "exact style and nothing else - a sound id, a colon, then the number:\n\n"
+        'Example, for "cozy rainy evening":\n'
+        "rain: 70\n"
+        "fireplace: 40\n\n"
+        "Now do it for the mood above:"
+    )
+    text = call_ollama(prompt, num_predict=100, temperature=0.7, model=OLLAMA_STRONG_MODEL, timeout=30)
+
+    layers = []
+    for line in text.splitlines():
+        # Tolerates stray wrapping punctuation (e.g. "<rain>: 70") - an
+        # earlier version of the prompt above used <id>/<volume> as
+        # placeholder notation in a format line, and the model echoed the
+        # angle brackets back literally instead of treating them as "fill
+        # this in" notation. Prompt no longer does that, but parsing stays
+        # lenient as a second line of defense.
+        match = re.match(r"^\s*[<\[({]*\s*([a-zA-Z]+)\s*[>\])}]*\s*:\s*(\d+)", line)
+        if not match:
+            continue
+        sound_id, volume = match.group(1).strip(), int(match.group(2))
+        if sound_id not in SOUND_LIBRARY_IDS:
+            continue  # not a real sound id - model hallucinated or misread the list
+        layers.append({"soundId": sound_id, "volumePercent": max(0, min(100, volume))})
+        if len(layers) >= 4:  # matches MIXER_LAYER_COUNT in script.js
+            break
+
+    if not layers:
+        raise ValueError("no valid sounds parsed from model response")
+    return layers
+
+
+# ---------------------------------------------------------------------------
+# Week in Review - a bigger-picture, once-a-week cousin of the daily
+# insight. The actual week-over-week comparison is computed here in plain
+# Python (not by the model, for the same arithmetic-reliability reason as
+# compute_trend_fact()); the model only ever writes the paragraph from
+# facts already computed.
+# ---------------------------------------------------------------------------
+
+def compute_week_in_review_facts(sleep_history, habit_completion_by_date):
+    from datetime import date, timedelta
+    import statistics
+
+    today = date.today()
+
+    def week_range(weeks_ago):
+        this_monday = today - timedelta(days=today.weekday())
+        start = this_monday - timedelta(weeks=weeks_ago)
+        return start, start + timedelta(days=6)
+
+    this_start, this_end = week_range(0)
+    last_start, last_end = week_range(1)
+
+    def minutes_in_range(start, end):
+        values = []
+        for s in sleep_history:
+            try:
+                d = date.fromisoformat(s["date"])
+            except (KeyError, ValueError):
+                continue
+            if start <= d <= end and s.get("minutes"):
+                values.append(s["minutes"])
+        return values
+
+    this_week_sleep = minutes_in_range(this_start, this_end)
+    last_week_sleep = minutes_in_range(last_start, last_end)
+
+    facts = {}
+    if this_week_sleep:
+        facts["avg_sleep_this_week_hours"] = round(statistics.mean(this_week_sleep) / 60, 1)
+        facts["nights_tracked_this_week"] = len(this_week_sleep)
+    if last_week_sleep:
+        facts["avg_sleep_last_week_hours"] = round(statistics.mean(last_week_sleep) / 60, 1)
+
+    habit_completions_this_week = 0
+    for h in habit_completion_by_date:
+        try:
+            d = date.fromisoformat(h.get("date", ""))
+        except ValueError:
+            continue
+        if h.get("completed") and this_start <= d <= this_end:
+            habit_completions_this_week += 1
+    if habit_completion_by_date:
+        facts["habit_completions_this_week"] = habit_completions_this_week
+
+    return facts
+
+
+def generate_week_in_review(sleep_history, habit_completion_by_date):
+    facts = compute_week_in_review_facts(sleep_history or [], habit_completion_by_date or [])
+    if not facts:
+        raise ValueError("not enough data yet for a week in review")
+
+    facts_text = "; ".join(f"{k}: {v}" for k, v in facts.items())
+    prompt = (
+        "You write a short (4-5 sentence), warm week-in-review for a bedside dashboard, "
+        "from the facts below - a bigger-picture look back than a daily summary. "
+        "Mention the week-over-week sleep comparison if both weeks' data is present. "
+        "No markdown, no preamble like \"Here is\" - respond with ONLY the review "
+        f"itself.\n\nFacts: {facts_text}\n\nReview:"
+    )
+    text = call_ollama(prompt, num_predict=220, temperature=0.6, timeout=45)
+    text = text.strip().strip("\"")
+    if not text:
+        raise ValueError("empty week in review")
     return text
 
 
@@ -822,6 +984,30 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 payload = self._read_json_body()
                 text = generate_meal_idea(payload.get("items") or [])
+                self._send_json(200, {"text": text})
+            except Exception as e:
+                self._send_json(502, {"error": str(e)})
+            return
+        if parsed.path == "/ask":
+            try:
+                payload = self._read_json_body()
+                text = generate_answer(payload.get("question") or "")
+                self._send_json(200, {"text": text})
+            except Exception as e:
+                self._send_json(502, {"error": str(e)})
+            return
+        if parsed.path == "/soundscape-mood":
+            try:
+                payload = self._read_json_body()
+                layers = generate_soundscape(payload.get("mood") or "")
+                self._send_json(200, {"layers": layers})
+            except Exception as e:
+                self._send_json(502, {"error": str(e)})
+            return
+        if parsed.path == "/week-in-review":
+            try:
+                payload = self._read_json_body()
+                text = generate_week_in_review(payload.get("sleepHistory"), payload.get("habitCompletionByDate"))
                 self._send_json(200, {"text": text})
             except Exception as e:
                 self._send_json(502, {"error": str(e)})
