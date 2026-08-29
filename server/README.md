@@ -143,13 +143,18 @@ send a follow-up "back to normal" notification once resolved.
 
 ## Discord bot setup
 
-Lets Rusty run `/note <text>` or `/shop <item>` from anywhere on Discord to
-add a Sticky Note or Shopping List item to the dashboard - see
-`discord_bot.py`'s own docstring for exactly how it queues things and
-`GET /discord-inbox` in `server.py` for how the dashboard picks them up.
-This is a **separate bot/token** from the `judgment-bot` already running on
-this box, on purpose - keeps the two projects' Discord presence
-independent.
+Lets Rusty run `/note <text>`, `/shop <item>`, or `/tell <text>` from
+anywhere on Discord to add a Sticky Note, a Shopping List item, or an
+urgent on-screen banner to the dashboard - see `discord_bot.py`'s own
+docstring for exactly how it queues things and `GET /discord-inbox` in
+`server.py` for how the dashboard picks them up. Deliberately
+one-directional (Discord → dashboard only) - there's no legitimate way for
+a bot to read someone's real Discord DMs/mentions on their behalf (that
+would need a self-bot using a personal user token, which violates
+Discord's ToS and risks the account), so this only ever covers messaging
+your own future bedside-self, not a two-way inbox. This is a **separate
+bot/token** from the `judgment-bot` already running on this box, on
+purpose - keeps the two projects' Discord presence independent.
 
 Built as a **user-installed app**, not a traditional guild bot - installed
 to Rusty's own Discord account rather than added to a server he admins,

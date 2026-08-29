@@ -529,6 +529,57 @@ body.reading-mode-active .reading-mode-overlay {
   cursor: pointer;
 }
 
+/* Same "grab attention, glanceable from across the room" weight as
+   .severe-alert-banner (pulsing icon included), but in the accent blue
+   rather than danger red - a /tell from Discord isn't a weather
+   emergency, shouldn't look like one. */
+.tell-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.55em 0.9em;
+  border-radius: 0.6em;
+  background: var(--accent-blue);
+  color: var(--surface);
+  box-shadow: 0 0.15em 0.6em color-mix(in srgb, var(--accent-blue) 45%, transparent);
+}
+
+.tell-banner .icon-slot {
+  flex: none;
+  animation: severe-alert-pulse 2s ease-in-out infinite;
+}
+
+.tell-text {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-caption);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tell-count {
+  flex: none;
+  font-size: 0.66rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--surface);
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 999px;
+  padding: 0.15em 0.55em;
+}
+
+.tell-dismiss {
+  flex: none;
+  background: transparent;
+  border: none;
+  color: var(--surface);
+  opacity: 0.85;
+  font-size: var(--fs-body-lg);
+  line-height: 1;
+  padding: 0.1em 0.3em;
+  cursor: pointer;
+}
+
 /* Invisible full-screen tap-to-close layer behind the editor popover -
    not a dimmed modal backdrop, since editing a couple of short notes
    doesn't call for darkening the whole display like Bedside/Ambient

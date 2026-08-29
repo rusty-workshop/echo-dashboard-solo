@@ -358,15 +358,20 @@ unreachable — nothing on the dashboard depends on it existing.
   server (scp) and it resizes/re-encodes/dedupes them; the dashboard pulls
   one new one into its existing photo rotation each day, capped at 15
   server-sourced photos so it doesn't grow forever.
-- **Discord integration**: `/note <text>` or `/shop <item>` from anywhere on
-  Discord — a DM with a small dedicated bot, or any server you're in, no
-  admin permissions needed anywhere, since it's installed to your own
-  account rather than added to a server — shows up as a Sticky Note or
-  Shopping List item on the dashboard's next poll (every 5 minutes). The
-  one feature here that's an *additional* remote input channel rather than
-  something the dashboard generates on its own — the dashboard itself
-  stays exactly as phone-free as ever; this is purely optional icing for
-  when you think of something to add to a list while you're out.
+- **Discord integration**: `/note <text>`, `/shop <item>`, or `/tell <text>`
+  from anywhere on Discord — a DM with a small dedicated bot, or any server
+  you're in, no admin permissions needed anywhere, since it's installed to
+  your own account rather than added to a server — shows up as a Sticky
+  Note, a Shopping List item, or an urgent glanceable banner on the
+  Overview (same visual weight as a severe weather alert, in blue) on the
+  dashboard's next poll (every 5 minutes). One-directional by design
+  (Discord → dashboard, never the other way) — reading or replying to
+  other people's actual Discord messages isn't something a bot can
+  legitimately do, so this is you messaging your own future bedside-self,
+  not a two-way inbox. The dashboard itself stays exactly as phone-free as
+  ever without any of this configured; it's purely optional icing for when
+  you think of something to add to a list, or want to flag something
+  urgent, while you're out.
 
 ## Requirements
 

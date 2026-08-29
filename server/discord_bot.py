@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Discord bot for echo-dashboard-solo's Companion Server - lets Rusty add
-a Sticky Note or Shopping List item to the bedside dashboard from anywhere
-on Discord. A separate always-on process from server.py (its own systemd
+a Sticky Note or Shopping List item, or push an urgent on-screen message, to
+the bedside dashboard from anywhere on Discord. A separate always-on
+process from server.py (its own systemd
 service, dashboard-discord-bot.service - see server/README.md), not
 imported by it; the two only ever communicate through
 data/discord_inbox.json, which server.py's GET /discord-inbox reads and
@@ -23,6 +24,11 @@ propagate the first time; it's instant on every restart after that.
 Commands:
   /note text:<text>   -> queued as a Sticky Note
   /shop item:<item>   -> queued as a Shopping List item
+  /tell text:<text>   -> queued as an urgent banner on the Overview page
+                          (see queueTellMessage() in script.js) - one-
+                          directional (Discord -> dashboard) by design;
+                          this is messaging your own future bedside-self,
+                          not a two-way chat with other people
 
 Needs its own bot token (DASHBOARD_DISCORD_BOT_TOKEN in
 ~/dashboard-server/env) - separate from the judgment-bot already running on
@@ -90,6 +96,13 @@ async def note_command(interaction: discord.Interaction, text: str):
 async def shop_command(interaction: discord.Interaction, item: str):
     queue_item("shop", item)
     await interaction.response.send_message(f"Added to Shopping List: {item}", ephemeral=True)
+
+
+@client.tree.command(name="tell", description="Show an urgent message on the bedside dashboard right now")
+@app_commands.describe(text="The message to show")
+async def tell_command(interaction: discord.Interaction, text: str):
+    queue_item("tell", text)
+    await interaction.response.send_message(f"Sent to the dashboard: {text}", ephemeral=True)
 
 
 def main():

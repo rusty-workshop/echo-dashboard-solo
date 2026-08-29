@@ -2694,12 +2694,75 @@ async function pollDiscordInbox() {
     } else if (item.type === "shop") {
       shoppingListItems.push({ id: `shop-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, label: item.text, checked: false });
       shoppingListChanged = true;
+    } else if (item.type === "tell") {
+      queueTellMessage(item.text);
     }
   }
   if (shoppingListChanged) {
     saveShoppingList();
     renderShoppingList();
   }
+}
+
+// ---------------------------------------------------------------------------
+// /tell - an urgent, glanceable-from-across-the-room banner (same visual
+// weight as the severe weather alert, in blue instead of red), for when a
+// quiet Sticky Note isn't attention-grabbing enough. One-directional
+// (Discord -> dashboard) by design - reading/replying to other people's
+// real Discord messages isn't something a bot can legitimately do; this is
+// just you messaging your own future bedside-self.
+// ---------------------------------------------------------------------------
+const TELL_MESSAGES_KEY = "aurora-dashboard:tell-messages";
+
+function loadTellMessages() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(TELL_MESSAGES_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (err) {
+    return [];
+  }
+}
+
+let tellMessages = loadTellMessages();
+
+function saveTellMessages() {
+  localStorage.setItem(TELL_MESSAGES_KEY, JSON.stringify(tellMessages));
+}
+
+function queueTellMessage(text) {
+  tellMessages.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, text, receivedAt: Date.now() });
+  saveTellMessages();
+  renderTellBanner();
+}
+
+/** Shows the oldest unread one (FIFO, not a rotating cycle like Sticky
+ *  Notes - this is meant to be acknowledged and cleared one at a time,
+ *  like a real notification, not passively browsed). */
+function renderTellBanner() {
+  const banner = byId("tell-banner");
+  if (!banner) return;
+  const show = tellMessages.length > 0 && !privacyModeActive;
+  banner.classList.toggle("hidden", !show);
+  if (!show) return;
+
+  setText("tell-text", tellMessages[0].text);
+  const count = byId("tell-count");
+  if (count) {
+    count.classList.toggle("hidden", tellMessages.length <= 1);
+    count.textContent = `+${tellMessages.length - 1}`;
+  }
+}
+
+function dismissTellMessage() {
+  tellMessages.shift();
+  saveTellMessages();
+  renderTellBanner();
+}
+
+function setupTellBanner() {
+  setIcon("tell-icon", "bell");
+  renderTellBanner();
+  byId("tell-dismiss")?.addEventListener("click", dismissTellMessage);
 }
 
 function setupDiscordInboxPolling() {
@@ -9461,6 +9524,7 @@ function init() {
   setupTempUnitSetting();
   setupProfileSettings();
   setupStickyNote();
+  setupTellBanner();
   setupSevereAlertDismiss();
   setupAutoBedsideSetting();
   setupBedsideAutoSoundSetting();
