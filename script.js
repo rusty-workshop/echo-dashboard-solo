@@ -2739,6 +2739,112 @@ function setupHeartbeat() {
 }
 
 // ---------------------------------------------------------------------------
+// Homelab Status page - mirrors homelab-dashboard's own status.json (a
+// separate small server on the LAN, see ~/Projects/homelab-dashboard),
+// showing the same "what's going on across the homelab" cards natively
+// in this app's own theme instead of embedding it. A different server
+// than the Companion Server above (that one's this app's own optional
+// backend; this is a general homelab overview that exists independently
+// of this dashboard) - separate URL, separate localStorage key. Same
+// degrade-quietly philosophy: unset or unreachable just means an empty
+// page, never an error state.
+// ---------------------------------------------------------------------------
+const HOMELAB_URL_KEY = "aurora-dashboard:homelab-dashboard-url";
+const HOMELAB_POLL_INTERVAL_MS = 60 * 1000;
+
+function homelabDashboardUrl() {
+  return (localStorage.getItem(HOMELAB_URL_KEY) || "").trim().replace(/\/+$/, "");
+}
+
+/** Returns the parsed status.json body, or null on any failure/timeout/
+ *  missing config - same shape as companionFetch's contract. */
+async function fetchHomelabStatus() {
+  const base = homelabDashboardUrl();
+  if (!base) return null;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000);
+  try {
+    const resp = await fetch(base + "/status.json", { signal: controller.signal });
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch (err) {
+    return null;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+function homelabCardHtml(item) {
+  const dotClass = item.ok === null || item.ok === undefined ? "unknown" : item.ok ? "ok" : "bad";
+  const detailHtml = item.url
+    ? `<a href="${escapeHtml(item.url)}">${escapeHtml(item.detail)}</a>`
+    : escapeHtml(item.detail || "");
+  return (
+    `<div class="homelab-card">` +
+    `<div class="homelab-card-head"><span class="homelab-dot ${dotClass}"></span><span class="homelab-card-title">${escapeHtml(item.title)}</span></div>` +
+    `<div class="homelab-status-line">${escapeHtml(item.status_line || "")}</div>` +
+    `<div class="homelab-detail">${detailHtml}</div>` +
+    `</div>`
+  );
+}
+
+function renderHomelabStatus(data) {
+  const localGrid = byId("homelab-local-grid");
+  const servicesGrid = byId("homelab-services-grid");
+  const updated = byId("homelab-updated");
+  const emptyHint = byId("homelab-empty-hint");
+
+  const hasConfig = !!homelabDashboardUrl();
+  emptyHint?.classList.toggle("hidden", hasConfig);
+
+  if (!data) {
+    if (localGrid) localGrid.innerHTML = "";
+    if (servicesGrid) servicesGrid.innerHTML = "";
+    if (updated) updated.textContent = hasConfig ? "Couldn't reach the homelab dashboard." : "";
+    return;
+  }
+
+  if (localGrid) localGrid.innerHTML = (data.local_tools || []).map(homelabCardHtml).join("");
+  if (servicesGrid) servicesGrid.innerHTML = (data.services || []).map(homelabCardHtml).join("");
+  if (updated) {
+    const generated = data.generated ? new Date(data.generated) : new Date();
+    updated.textContent = "Updated " + generated.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  }
+}
+
+async function refreshHomelabStatus() {
+  const data = await fetchHomelabStatus();
+  renderHomelabStatus(data);
+}
+
+function setupHomelabStatusPage() {
+  setIcon("homelab-title-icon", "globe");
+  refreshHomelabStatus();
+  setInterval(refreshHomelabStatus, HOMELAB_POLL_INTERVAL_MS);
+}
+
+function setupHomelabDashboardSettings() {
+  const urlInput = byId("homelab-dashboard-url-input");
+  const hint = byId("homelab-dashboard-hint");
+
+  const showHint = (text) => {
+    if (!hint) return;
+    hint.textContent = text;
+    hint.classList.toggle("hidden", !text);
+  };
+
+  if (urlInput) urlInput.value = localStorage.getItem(HOMELAB_URL_KEY) || "";
+
+  byId("homelab-dashboard-save-btn")?.addEventListener("click", async () => {
+    localStorage.setItem(HOMELAB_URL_KEY, (urlInput?.value || "").trim());
+    showHint("Checking connection...");
+    const data = await fetchHomelabStatus();
+    showHint(data ? "Connected." : "Saved, but couldn't reach it - double check the address and that homelab-dashboard is running.");
+    renderHomelabStatus(data);
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Discord inbox - DM the Companion Server's Discord bot ("note: ..." or
 // "shop: ..." - see discord_bot.py) from anywhere, and it shows up here on
 // the next poll. The dashboard is still fully phone-free on its own; this
@@ -9713,6 +9819,8 @@ function init() {
   setupDynamicInsight();
   setupCompanionServerSettings();
   setupHeartbeat();
+  setupHomelabDashboardSettings();
+  setupHomelabStatusPage();
   setupDiscordInboxPolling();
   setupBackupSettings();
   loadTodayInHistory();

@@ -922,6 +922,17 @@
       </div>
 
       <div class="settings-section">
+        <h2 class="settings-title">Homelab Dashboard</h2>
+        <div class="settings-text-hint">Optional - point this at a homelab-dashboard instance (a small status page for the rest of the homelab: backups, dotfile snapshots, LAN devices, other services) to see it on its own page here. Leave blank and the Homelab Status page stays empty.</div>
+        <div class="settings-text-row">
+          <span class="settings-text-label">Dashboard address</span>
+          <input type="text" id="homelab-dashboard-url-input" class="settings-text-input" placeholder="http://192.168.1.x:8092" autocomplete="off" aria-label="Homelab dashboard address" />
+        </div>
+        <button class="settings-add-btn" type="button" id="homelab-dashboard-save-btn">Save &amp; Test</button>
+        <div class="settings-text-hint hidden" id="homelab-dashboard-hint"></div>
+      </div>
+
+      <div class="settings-section">
         <h2 class="settings-title">Theme</h2>
         <div class="theme-grid" id="theme-grid">
           <button class="theme-swatch" data-theme-value="default" aria-label="Default theme">
@@ -1093,6 +1104,25 @@
         <div class="settings-text-hint hidden" id="ask-answer-text"></div>
       </div>
     </section>
+
+    <section class="page page-homelab" id="page-homelab" aria-label="Homelab Status">
+      <h2 class="card-title">
+        <span class="icon-slot small" id="homelab-title-icon" aria-hidden="true"></span>
+        Homelab Status
+      </h2>
+      <div class="settings-text-hint hidden" id="homelab-empty-hint">Set a Homelab Dashboard address on the Settings page to see it here.</div>
+      <div class="homelab-updated" id="homelab-updated"></div>
+
+      <div class="settings-section">
+        <h2 class="settings-title">Local Tools</h2>
+        <div class="homelab-grid" id="homelab-local-grid"></div>
+      </div>
+
+      <div class="settings-section">
+        <h2 class="settings-title">Latitude Services</h2>
+        <div class="homelab-grid" id="homelab-services-grid"></div>
+      </div>
+    </section>
   </div>
 
   <nav class="page-dots" id="page-dots" aria-label="Dashboard pages">
@@ -1105,6 +1135,7 @@
     <button class="page-dot" data-page="6" aria-label="Settings"></button>
     <button class="page-dot" data-page="7" aria-label="Timer and Stopwatch"></button>
     <button class="page-dot" data-page="8" aria-label="Journal and Word Game"></button>
+    <button class="page-dot" data-page="9" aria-label="Homelab Status"></button>
   </nav>
 
   <!-- Week-ahead glance and Agenda editor, opened from the Agenda card's

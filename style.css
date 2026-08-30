@@ -5267,6 +5267,93 @@ body.ambient-active .weather-bg {
   font-style: italic;
 }
 
+/* ---- Homelab Status (Page 10) -----------------------------------------
+   A read-only mirror of homelab-dashboard's own status page (see
+   ~/Projects/homelab-dashboard), fetched as JSON from
+   HOMELAB_URL_KEY + "/status.json" - see setupHomelabStatusPage() in
+   script.js. Cards use the same three-state dot language (ok/bad/unknown)
+   as that page, just themed with this app's own CSS variables instead of
+   a hardcoded palette so it matches whichever theme is active here. */
+.page-homelab {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  gap: clamp(0.75rem, 2vh, 1.25rem);
+}
+
+.page-homelab::-webkit-scrollbar {
+  display: none;
+}
+
+.homelab-updated {
+  flex: none;
+  font-size: var(--fs-caption);
+  color: var(--text-tertiary);
+}
+
+.homelab-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: clamp(0.5rem, 1.4vh, 0.85rem);
+}
+
+.homelab-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3em;
+  padding: 0.7em 0.9em;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.homelab-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+}
+
+.homelab-card-title {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.homelab-dot {
+  width: 0.55em;
+  height: 0.55em;
+  border-radius: 50%;
+  flex: none;
+}
+
+.homelab-dot.ok {
+  background: #4caf6f;
+}
+
+.homelab-dot.bad {
+  background: var(--accent-danger);
+}
+
+.homelab-dot.unknown {
+  background: var(--text-tertiary);
+}
+
+.homelab-status-line {
+  font-size: var(--fs-caption-lg);
+  color: var(--text-secondary);
+}
+
+.homelab-detail {
+  font-size: var(--fs-caption);
+  color: var(--text-tertiary);
+}
+
+.homelab-detail a {
+  color: var(--accent-blue);
+}
+
 /* ---- Journal History popover --------------------------------------------
    Reuses .week-view-popover/.week-view-backdrop wholesale (see
    #journal-history-popover in index.html) - only the list/detail content
