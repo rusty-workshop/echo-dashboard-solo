@@ -227,6 +227,30 @@ The first line of `-v` output should name the actual GPU (e.g. "Intel(R)
 HD Graphics 520") - if it's missing or the run is unexpectedly slow,
 `vulkan-intel` likely isn't installed/loaded.
 
+## Homelab status
+
+`GET /homelab-status` powers the dashboard's Homelab Status page. Two
+halves, gathered differently (see `gather_homelab_status()` in
+`server.py`):
+
+- **`services`** - every service actually running on this box (Discord
+  bots via `systemctl --user is-active`, Docker containers via
+  `docker inspect`, everything else via a plain HTTP reachability check)
+  is checked fresh on every single request. No caching, no separate timer
+  needed - this machine is always on, so "checked live" and "checked
+  recently" are the same thing here. `DASHBOARD_LATITUDE_LAN_IP` (default
+  `192.168.1.158`) controls the address shown/linked for LAN-reachable
+  ones - Vaultwarden and Syncthing are deliberately excluded from that
+  (Tailscale-only by design, see their own sections above/below), shown
+  as a plain status instead of a link the Echo Show couldn't open anyway.
+- **`local_tools`** - ii-snap, wallpaper-sync, ii-update-check only run on
+  the main PC, which isn't a 24/7 server, so there's nothing to check
+  live from here. Instead `POST /homelab-local-status` accepts whatever
+  `~/Projects/homelab-dashboard/push_status.py` over there last pushed
+  (every 30 min, see that repo's README), and `/homelab-status` serves it
+  back verbatim, tagged "stale" past `HOMELAB_LOCAL_STATUS_MAX_AGE_SECONDS`
+  (3h) since the main PC being off is the normal case, not an error one.
+
 ## Firewall
 
 Only reachable from the home LAN, not the whole world:
@@ -265,6 +289,7 @@ curl -s -X POST $BASE/ask -H "X-Dashboard-Key: $KEY" -d '{"question":"what year 
 curl -s -X POST $BASE/soundscape-mood -H "X-Dashboard-Key: $KEY" -d '{"mood":"cozy rainy evening"}'
 curl -s -X POST $BASE/week-in-review -H "X-Dashboard-Key: $KEY" -d '{"sleepHistory":[],"habitCompletionByDate":[]}'
 curl -s -X POST $BASE/wallpaper-upscale -H "X-Dashboard-Key: $KEY" --data-binary @test.jpg -o upscaled.jpg
+curl -s $BASE/homelab-status -H "X-Dashboard-Key: $KEY"
 ```
 
 ## Passwordless sudo on this box

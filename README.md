@@ -403,6 +403,16 @@ unreachable — nothing on the dashboard depends on it existing.
   Existing Photos" button in Settings retroactively improves anything
   imported before this existed, in place, without losing or reordering
   any of them.
+- **Homelab Status page**: shows what's actually running — every service on
+  the Latitude server (Discord bots, Judgment Dashboard, KaiOS Alerts,
+  Uptime Kuma, AdGuard Home, Vaultwarden, Syncthing, changedetection.io,
+  PrivateBin, Watchtower) checked live on every request, plus the main
+  PC's own local tools (ii-snap, wallpaper-sync, ii-update-check), which
+  it can't check live since that machine isn't a 24/7 server — instead it
+  gets periodically pushed status from a small script over there (see
+  `~/Projects/homelab-dashboard`), served back with a staleness note if
+  it's been too long since the last check-in. All one endpoint on the
+  Companion Server — no separate URL to configure.
 
 ## Requirements
 

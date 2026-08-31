@@ -42,6 +42,15 @@ offline/on-device:
                              actually displays at (already-large photos are
                              returned through the same resize/encode path
                              untouched, no GPU work)
+  GET  /homelab-status      -> {"generated","local_tools":[...],"services":[...]}
+                               - services are checked live, right here;
+                               local_tools is whatever the main PC last
+                               POSTed to /homelab-local-status (see below),
+                               flagged stale past 3h since that machine
+                               isn't a 24/7 server
+  POST /homelab-local-status  body: {"local_tools":[...]} -> {"ok": true} -
+                             fed by ~/Projects/homelab-dashboard/push_status.py
+                             on the main PC, see that repo's README
 
 Everything is stdlib-only except skyfield (ISS passes), Pillow (wallpaper
 processing), the Piper TTS binary (piper/piper/piper) + a voice model
@@ -122,6 +131,14 @@ HISTORICAL_WEATHER_CACHE_FILE = DATA_DIR / "historical_weather_cache.json"
 HISTORICAL_WEATHER_YEARS_BACK = 5
 
 DISCORD_INBOX_FILE = DATA_DIR / "discord_inbox.json"
+
+HOMELAB_LOCAL_STATUS_FILE = DATA_DIR / "homelab_local_status.json"
+HOMELAB_LOCAL_STATUS_MAX_AGE_SECONDS = 3 * 3600  # flagged stale past this - see gather_homelab_status()
+# This box's own LAN address - checks in gather_latitude_services() hit
+# localhost regardless (cheaper, and this server IS that machine), but the
+# URL handed back to the dashboard has to be something the Echo Show can
+# actually reach/display, not this process's own loopback.
+LATITUDE_LAN_IP = os.environ.get("DASHBOARD_LATITUDE_LAN_IP", "192.168.1.158")
 
 WALLPAPER_DIR = BASE / "wallpapers"
 WALLPAPER_INBOX_DIR = WALLPAPER_DIR / "inbox"
@@ -753,6 +770,150 @@ def consume_discord_inbox():
 
 
 # ---------------------------------------------------------------------------
+# Homelab status - powers echo-dashboard-solo's Homelab Status page. Split
+# in two halves for the same reason homelab-dashboard (the main-PC app this
+# was folded in from) was split: "local tools" (ii-snap, wallpaper-sync,
+# ii-update-check) only run on the main PC, so it POSTs its own status here
+# periodically (see ~/Projects/homelab-dashboard/push_status.py on that
+# machine) and this just serves back whatever it last received, with a
+# staleness note once it's been too long - the main PC isn't a 24/7 server,
+# unlike this one. Everything in "services" below runs right here, so it's
+# checked live on every request instead of needing anything pushed to it.
+# Every item is the same {title, status_line, detail, ok} shape the
+# dashboard already renders for both sections - see homelabCardHtml() in
+# script.js.
+# ---------------------------------------------------------------------------
+
+def load_homelab_local_status():
+    if not HOMELAB_LOCAL_STATUS_FILE.exists():
+        return None
+    try:
+        return json.loads(HOMELAB_LOCAL_STATUS_FILE.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def save_homelab_local_status(payload):
+    payload = dict(payload)
+    payload["receivedAt"] = datetime.now(timezone.utc).isoformat()
+    HOMELAB_LOCAL_STATUS_FILE.write_text(json.dumps(payload))
+
+
+def check_http_reachable(url, timeout=2.0):
+    """True on any real HTTP response, even an error status - that still
+    proves the process is alive and serving, which is what these cards are
+    actually trying to show (not that every route returns 200)."""
+    try:
+        urllib.request.urlopen(urllib.request.Request(url), timeout=timeout)
+        return True
+    except urllib.error.HTTPError:
+        return True
+    except Exception:
+        return False
+
+
+def check_systemd_active(unit):
+    try:
+        proc = subprocess.run(["systemctl", "--user", "is-active", unit], capture_output=True, text=True, timeout=5)
+        return proc.stdout.strip() == "active"
+    except Exception:
+        return False
+
+
+def docker_container_status(name):
+    """Returns (running, health) - health is None when the image defines no
+    healthcheck at all (most of these don't), in which case "running" is
+    the whole signal."""
+    try:
+        proc = subprocess.run(
+            ["docker", "inspect", "--format", "{{.State.Running}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}", name],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if proc.returncode != 0:
+            return None, None
+        running, health = proc.stdout.strip().split("|")
+        return running == "true", (None if health == "none" else health)
+    except Exception:
+        return None, None
+
+
+def gather_latitude_services():
+    items = []
+
+    def add_http(title, port):
+        # Checked via localhost (cheap, no network hop - this server IS
+        # that machine) but shown/linked via the real LAN address, which is
+        # the only one the Echo Show viewing this can actually do anything
+        # useful with.
+        ok = check_http_reachable(f"http://localhost:{port}/")
+        display_url = f"http://{LATITUDE_LAN_IP}:{port}/"
+        items.append({"title": title, "status_line": "reachable" if ok else "unreachable", "detail": display_url, "ok": ok, "url": display_url})
+
+    def add_systemd(title, unit):
+        ok = check_systemd_active(unit)
+        items.append({"title": title, "status_line": "running" if ok else "not running", "detail": unit, "ok": ok})
+
+    def add_docker(title, name):
+        running, health = docker_container_status(name)
+        if running is None:
+            items.append({"title": title, "status_line": "not found", "detail": name, "ok": None})
+            return
+        items.append({
+            "title": title,
+            "status_line": health or ("running" if running else "stopped"),
+            "detail": name,
+            "ok": running and health in (None, "healthy"),
+        })
+
+    def add_tailnet_only(title, port):
+        # Deliberately not exposed on the plain LAN (see server/README.md) -
+        # reachable only over Tailscale, which this kiosk isn't on. Checked
+        # the same way as everything else (loopback, from right here), but
+        # given no "url" - a link the Echo Show can't actually open would
+        # just be a broken tap target, worse than no link at all.
+        ok = check_http_reachable(f"http://localhost:{port}/")
+        items.append({"title": title, "status_line": "running (Tailscale-only, not LAN-reachable)" if ok else "not reachable", "detail": "", "ok": ok})
+
+    # Discord bots have no meaningful web UI to check - their own systemd
+    # active-state is the honest signal here, not an HTTP probe.
+    add_systemd("Discord Bot (dashboard)", "dashboard-discord-bot.service")
+    add_systemd("Judgment Bot", "judgment-bot.service")
+    add_http("Judgment Dashboard", 8090)
+    add_http("KaiOS Alerts", 8095)
+    add_http("Uptime Kuma", 3001)
+    add_http("AdGuard Home", 8091)
+    add_tailnet_only("Vaultwarden", 8222)
+    add_tailnet_only("Syncthing", 8384)
+    add_http("changedetection.io", 5000)
+    add_http("PrivateBin", 8085)
+    add_docker("Watchtower", "watchtower")  # background-only, no web UI at all
+    return items
+
+
+def gather_homelab_status():
+    local = load_homelab_local_status()
+    if local is None:
+        local_tools = [{"title": "Local Tools", "status_line": "waiting for the main PC's first check-in", "detail": "", "ok": None}]
+    else:
+        received = datetime.fromisoformat(local["receivedAt"])
+        stale = (datetime.now(timezone.utc) - received).total_seconds() > HOMELAB_LOCAL_STATUS_MAX_AGE_SECONDS
+        local_tools = []
+        for item in local.get("local_tools", []):
+            item = dict(item)
+            if stale:
+                item["status_line"] = f"{item.get('status_line', '')} - stale, main PC may be off".strip(" -")
+            local_tools.append(item)
+
+    return {
+        "generated": datetime.now(timezone.utc).isoformat(),
+        "local_tools": local_tools,
+        "services": gather_latitude_services(),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Wallpaper rotation - drop photos into wallpapers/inbox/ (scp, see
 # server/README.md), this processes any not-yet-seen file into
 # wallpapers/processed/ (resized, JPEG, deduped by content hash) and serves
@@ -988,6 +1149,12 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._send_json(500, {"error": str(e)})
             return
+        if parsed.path == "/homelab-status":
+            try:
+                self._send_json(200, gather_homelab_status())
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
+            return
         self._send_json(404, {"error": "not found"})
 
     def do_POST(self):
@@ -1081,6 +1248,14 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(200, {"text": text})
             except Exception as e:
                 self._send_json(502, {"error": str(e)})
+            return
+        if parsed.path == "/homelab-local-status":
+            try:
+                payload = self._read_json_body()
+                save_homelab_local_status(payload)
+                self._send_json(200, {"ok": True})
+            except Exception as e:
+                self._send_json(500, {"error": str(e)})
             return
         if parsed.path == "/wallpaper-upscale":
             try:

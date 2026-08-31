@@ -2739,38 +2739,30 @@ function setupHeartbeat() {
 }
 
 // ---------------------------------------------------------------------------
-// Homelab Status page - mirrors homelab-dashboard's own status.json (a
-// separate small server on the LAN, see ~/Projects/homelab-dashboard),
-// showing the same "what's going on across the homelab" cards natively
-// in this app's own theme instead of embedding it. A different server
-// than the Companion Server above (that one's this app's own optional
-// backend; this is a general homelab overview that exists independently
-// of this dashboard) - separate URL, separate localStorage key. Same
-// degrade-quietly philosophy: unset or unreachable just means an empty
-// page, never an error state.
+// Homelab Status page - GET /homelab-status from the Companion Server
+// (same URL/key as everything else it backs, see companionFetch() above).
+// That endpoint checks Latitude's own services live on every request and
+// separately serves back whatever ~/Projects/homelab-dashboard/push_status.py
+// on the main PC last pushed it for the local-only tools (ii-snap,
+// wallpaper-sync, ii-update-check) - see gather_homelab_status() in
+// server/server.py. Used to be its own separate small server/URL/setting;
+// folded into the Companion Server once the local-tools data started
+// getting pushed to Latitude too, since there was no longer a reason for
+// this to be a second thing to configure. Same degrade-quietly philosophy
+// as everything else here: no Companion Server configured, or unreachable,
+// just means an empty page, never an error state.
 // ---------------------------------------------------------------------------
-const HOMELAB_URL_KEY = "aurora-dashboard:homelab-dashboard-url";
 const HOMELAB_POLL_INTERVAL_MS = 60 * 1000;
 
-function homelabDashboardUrl() {
-  return (localStorage.getItem(HOMELAB_URL_KEY) || "").trim().replace(/\/+$/, "");
-}
-
-/** Returns the parsed status.json body, or null on any failure/timeout/
- *  missing config - same shape as companionFetch's contract. */
+/** Returns the parsed /homelab-status body, or null on any failure/timeout/
+ *  missing config - same contract as companionFetch() itself. */
 async function fetchHomelabStatus() {
-  const base = homelabDashboardUrl();
-  if (!base) return null;
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 5000);
+  const resp = await companionFetch("/homelab-status", { timeoutMs: 8000 });
+  if (!resp) return null;
   try {
-    const resp = await fetch(base + "/status.json", { signal: controller.signal });
-    if (!resp.ok) return null;
     return await resp.json();
   } catch (err) {
     return null;
-  } finally {
-    clearTimeout(timeoutId);
   }
 }
 
@@ -2794,13 +2786,13 @@ function renderHomelabStatus(data) {
   const updated = byId("homelab-updated");
   const emptyHint = byId("homelab-empty-hint");
 
-  const hasConfig = !!homelabDashboardUrl();
+  const hasConfig = !!companionServerConfig();
   emptyHint?.classList.toggle("hidden", hasConfig);
 
   if (!data) {
     if (localGrid) localGrid.innerHTML = "";
     if (servicesGrid) servicesGrid.innerHTML = "";
-    if (updated) updated.textContent = hasConfig ? "Couldn't reach the homelab dashboard." : "";
+    if (updated) updated.textContent = hasConfig ? "Couldn't reach the Companion Server." : "";
     return;
   }
 
@@ -2821,27 +2813,6 @@ function setupHomelabStatusPage() {
   setIcon("homelab-title-icon", "globe");
   refreshHomelabStatus();
   setInterval(refreshHomelabStatus, HOMELAB_POLL_INTERVAL_MS);
-}
-
-function setupHomelabDashboardSettings() {
-  const urlInput = byId("homelab-dashboard-url-input");
-  const hint = byId("homelab-dashboard-hint");
-
-  const showHint = (text) => {
-    if (!hint) return;
-    hint.textContent = text;
-    hint.classList.toggle("hidden", !text);
-  };
-
-  if (urlInput) urlInput.value = localStorage.getItem(HOMELAB_URL_KEY) || "";
-
-  byId("homelab-dashboard-save-btn")?.addEventListener("click", async () => {
-    localStorage.setItem(HOMELAB_URL_KEY, (urlInput?.value || "").trim());
-    showHint("Checking connection...");
-    const data = await fetchHomelabStatus();
-    showHint(data ? "Connected." : "Saved, but couldn't reach it - double check the address and that homelab-dashboard is running.");
-    renderHomelabStatus(data);
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -9946,7 +9917,6 @@ function init() {
   setupDynamicInsight();
   setupCompanionServerSettings();
   setupHeartbeat();
-  setupHomelabDashboardSettings();
   setupHomelabStatusPage();
   setupAskPage();
   setupDiscordInboxPolling();
