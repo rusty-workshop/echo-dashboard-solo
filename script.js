@@ -3765,8 +3765,49 @@ function generateNoiseBuffer(soundId) {
   return buffer;
 }
 
+// Each cached entry is a fully-decoded PCM AudioBuffer - a custom sound's
+// decodeAudioData() output can run tens of MB for a few minutes of audio -
+// and this dashboard's page is a kiosk that stays open for days, never
+// reloading. An unbounded cache here just grows for as long as the device
+// is on, which on the Echo Show's limited WebView memory eventually tips
+// over into Fully Kiosk killing and restarting the "unresponsive" WebView.
+// Capped at more than the 4 the Mixer can have active at once, so normal
+// use never evicts something that's actually playing.
+const BUFFER_CACHE_MAX_ENTRIES = 8;
+
+/** soundIds that must never be evicted because they're playing right now -
+ *  the Single engine's current sound, plus whatever the Mixer's layers are
+ *  assigned to while it's running. */
+function soundIdsInActiveUse() {
+  const ids = new Set();
+  if (currentSoundId) ids.add(currentSoundId);
+  if (mixerPlaying) {
+    for (const layer of mixerLayers) {
+      if (layer.soundId) ids.add(layer.soundId);
+    }
+  }
+  return ids;
+}
+
+function pruneBufferCache() {
+  if (bufferCache.size <= BUFFER_CACHE_MAX_ENTRIES) return;
+  const active = soundIdsInActiveUse();
+  for (const id of bufferCache.keys()) {
+    if (bufferCache.size <= BUFFER_CACHE_MAX_ENTRIES) break;
+    if (active.has(id)) continue;
+    bufferCache.delete(id);
+  }
+}
+
 async function loadSoundBuffer(soundId) {
-  if (bufferCache.has(soundId)) return bufferCache.get(soundId);
+  if (bufferCache.has(soundId)) {
+    const buffer = bufferCache.get(soundId);
+    // Move to the end (most-recently-used) so a later prune evicts stale
+    // entries first, not whatever was merely cached earliest.
+    bufferCache.delete(soundId);
+    bufferCache.set(soundId, buffer);
+    return buffer;
+  }
   const ctx = ensureAudioContext();
   let buffer;
   if (isCustomSoundId(soundId)) {
@@ -3778,6 +3819,7 @@ async function loadSoundBuffer(soundId) {
     buffer = generateNoiseBuffer(soundId);
   }
   bufferCache.set(soundId, buffer);
+  pruneBufferCache();
   return buffer;
 }
 
