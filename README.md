@@ -394,6 +394,15 @@ unreachable — nothing on the dashboard depends on it existing.
   paragraph. Opens in a popover rather than sitting inline on the page,
   since a full paragraph doesn't reliably fit this dashboard's
   fixed-height pages alongside everything else already on Sleep Insights.
+- **Wallpaper upscaling**: every photo import runs through the server's
+  GPU (waifu2x, a real super-resolution model — not the LLM, which can't
+  do this) before the usual downscale-to-fit, so a small/low-res source
+  photo comes in sharp instead of getting stretched blurry by CSS. Only
+  fires when a photo's actually smaller than the dashboard needs — an
+  already-large photo skips the GPU step entirely. A one-time "Upscale
+  Existing Photos" button in Settings retroactively improves anything
+  imported before this existed, in place, without losing or reordering
+  any of them.
 
 ## Requirements
 

@@ -51,6 +51,7 @@ sudo pacman -S ollama espeak-ng python-pip   # espeak-ng is unused now (kept fro
 sudo systemctl enable --now ollama.service
 ollama pull llama3.2:1b
 ollama pull qwen2.5:3b-instruct
+sudo pacman -S waifu2x-ncnn-vulkan vulkan-intel   # see "Wallpaper upscaling" below
 ```
 
 Piper isn't packaged in Arch's repos (the `piper` package there is an
@@ -194,6 +195,38 @@ file-watcher. `wallpapers/processed/` itself is **not** pruned server-side
 `SERVER_WALLPAPER_MAX_COUNT` in `script.js`) - clean out old ones by hand
 if the inbox keeps growing indefinitely.
 
+## Wallpaper upscaling
+
+Needs `waifu2x-ncnn-vulkan` and a working Vulkan driver for the CPU's iGPU
+(`vulkan-intel` on Intel; substitute the AMD/Nvidia equivalent on other
+hardware) - both are official Arch packages, no AUR needed:
+
+```bash
+sudo pacman -S waifu2x-ncnn-vulkan vulkan-intel
+```
+
+Once installed, `POST /wallpaper-upscale` (see `upscale_wallpaper_image()`
+in `server.py`) is live with no further config. Every wallpaper import
+(`resizeImageFile()` in `script.js`) routes through it automatically
+whenever a Companion Server is configured - the server decides per-photo
+whether it's actually worth running through waifu2x's photo model (skipped
+entirely for photos already at or above `WALLPAPER_MAX_DIMENSION`, so an
+already-large photo costs nothing extra) and always returns a properly
+capped/JPEG-encoded result either way. A "Upscale Existing Photos" button
+in Settings (`upscaleExistingWallpapers()`) retroactively re-runs every
+already-imported photo through the same endpoint in place, for photos
+imported before the server was configured or before this feature existed.
+
+Sanity-check the binary directly if photos aren't coming back upscaled:
+
+```bash
+ssh latitude "waifu2x-ncnn-vulkan -v -i test.jpg -o out.png -s 4 -m /usr/share/waifu2x-ncnn-vulkan/models-upconv_7_photo"
+```
+
+The first line of `-v` output should name the actual GPU (e.g. "Intel(R)
+HD Graphics 520") - if it's missing or the run is unexpectedly slow,
+`vulkan-intel` likely isn't installed/loaded.
+
 ## Firewall
 
 Only reachable from the home LAN, not the whole world:
@@ -231,6 +264,7 @@ curl -s $BASE/discord-inbox -H "X-Dashboard-Key: $KEY"
 curl -s -X POST $BASE/ask -H "X-Dashboard-Key: $KEY" -d '{"question":"what year did the Titanic sink?"}'
 curl -s -X POST $BASE/soundscape-mood -H "X-Dashboard-Key: $KEY" -d '{"mood":"cozy rainy evening"}'
 curl -s -X POST $BASE/week-in-review -H "X-Dashboard-Key: $KEY" -d '{"sleepHistory":[],"habitCompletionByDate":[]}'
+curl -s -X POST $BASE/wallpaper-upscale -H "X-Dashboard-Key: $KEY" --data-binary @test.jpg -o upscaled.jpg
 ```
 
 ## Passwordless sudo on this box

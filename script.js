@@ -4423,7 +4423,7 @@ async function deleteWallpaperRecord(id) {
  *  long edge (untouched if already smaller) and re-encodes as JPEG - a
  *  4000x3000 camera photo has no business being stored at full size for a
  *  960x480 kiosk display. */
-async function resizeImageFile(file) {
+async function localResizeImageFile(file) {
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, WALLPAPER_MAX_DIMENSION / Math.max(bitmap.width, bitmap.height));
   const width = Math.round(bitmap.width * scale);
@@ -4439,6 +4439,31 @@ async function resizeImageFile(file) {
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error("toBlob failed"))), "image/jpeg", WALLPAPER_JPEG_QUALITY);
   });
+}
+
+/** Sends [file]'s raw bytes to the Companion Server's /wallpaper-upscale -
+ *  the server itself decides whether the photo's actually small enough to
+ *  be worth running through waifu2x, and always returns a properly capped/
+ *  encoded JPEG either way, so a caller never needs its own size check.
+ *  Returns null on any failure/timeout/missing config, same contract as
+ *  companionFetch(). */
+async function requestServerUpscale(file) {
+  const resp = await companionFetch("/wallpaper-upscale", {
+    method: "POST",
+    headers: { "Content-Type": file.type || "application/octet-stream" },
+    body: file,
+    timeoutMs: 60000,
+  });
+  if (!resp) return null;
+  return await resp.blob();
+}
+
+async function resizeImageFile(file) {
+  if (companionServerConfig()) {
+    const upscaled = await requestServerUpscale(file);
+    if (upscaled) return upscaled;
+  }
+  return localResizeImageFile(file);
 }
 
 /** Same cache-once-reuse-everywhere shape as loadSoundBuffer()'s
@@ -4665,6 +4690,7 @@ function renderWallpaperSettings() {
   // Scheduled, since those modes always snap back to their own fixed
   // photo rather than whatever showNextWallpaperPhoto() just picked.
   byId("wallpaper-shuffle-btn")?.classList.toggle("hidden", wallpaperMode !== "rotating" || wallpaperPhotoIds.length < 2);
+  byId("wallpaper-upscale-btn")?.classList.toggle("hidden", !companionServerConfig() || wallpaperPhotoIds.length === 0);
 
   renderWallpaperPhotoGrid();
   renderWallpaperSchedule();
@@ -4727,6 +4753,58 @@ async function pullServerWallpaper() {
   }
 }
 
+/** Retroactively runs every already-imported photo (manual and server-
+ *  pulled alike) back through /wallpaper-upscale, replacing each record
+ *  in place under its existing id - the set of photos, their ids, and
+ *  anything referencing them (Single/Schedule selections) stay exactly as
+ *  they were, only the stored bytes improve. wallpaperObjectUrls caches an
+ *  object URL per id pointing at the specific Blob instance it was created
+ *  from, which a later IndexedDB put() doesn't retroactively change - each
+ *  migrated id's cached URL has to be revoked so the next render actually
+ *  re-reads the new blob instead of continuing to show the old one. */
+async function upscaleExistingWallpapers() {
+  if (!companionServerConfig() || wallpaperPhotoIds.length === 0) return;
+  const btn = byId("wallpaper-upscale-btn");
+  if (btn) btn.disabled = true;
+
+  const ids = [...wallpaperPhotoIds];
+  let done = 0;
+  let failed = 0;
+  for (const id of ids) {
+    showWallpaperImportHint(`Upscaling ${done + 1}/${ids.length}...`);
+    try {
+      const record = await loadWallpaperRecord(id);
+      if (!record) continue;
+      const upscaled = await requestServerUpscale(record.blob);
+      if (!upscaled) {
+        failed++;
+        continue;
+      }
+      await saveWallpaperRecord(id, upscaled);
+      const oldUrl = wallpaperObjectUrls.get(id);
+      if (oldUrl) URL.revokeObjectURL(oldUrl);
+      wallpaperObjectUrls.delete(id);
+    } catch (err) {
+      failed++;
+    }
+    done++;
+  }
+
+  if (ids.includes(currentWallpaperPhotoId)) {
+    // Force the on-screen photo to re-fetch its (now-replaced) object URL
+    // rather than waiting for the next rotation/mode re-apply.
+    const shownId = currentWallpaperPhotoId;
+    currentWallpaperPhotoId = null;
+    await showWallpaperPhoto(shownId);
+  }
+
+  renderWallpaperPhotoGrid();
+  showWallpaperImportHint(
+    failed > 0 ? `Upscaled ${done - failed}/${ids.length} - ${failed} couldn't be reached.` : `Upscaled all ${ids.length} photos.`
+  );
+  if (btn) btn.disabled = false;
+}
+
 async function setupWallpaperSettings() {
   const importInput = byId("wallpaper-import-input");
   const importLabel = byId("wallpaper-import-label");
@@ -4761,6 +4839,8 @@ async function setupWallpaperSettings() {
     showNextWallpaperPhoto();
     renderWallpaperPhotoGrid(); // the grid's "active" thumbnail follows Single mode's selection, not rotation - no-op there, harmless either way
   });
+
+  byId("wallpaper-upscale-btn")?.addEventListener("click", upscaleExistingWallpapers);
 
   segmented.addEventListener("click", (event) => {
     const btn = event.target.closest(".settings-segment");

@@ -36,12 +36,19 @@ offline/on-device:
                              -> {"layers": [{"soundId","volumePercent"}, ...]}
   POST /week-in-review        body: {sleepHistory?, habitCompletionByDate?}
                              -> {"text": "..."}
+  POST /wallpaper-upscale     body: raw image bytes  -> image/jpeg, the same
+                             photo run through waifu2x-ncnn-vulkan's photo
+                             model when it's smaller than the dashboard
+                             actually displays at (already-large photos are
+                             returned through the same resize/encode path
+                             untouched, no GPU work)
 
 Everything is stdlib-only except skyfield (ISS passes), Pillow (wallpaper
 processing), the Piper TTS binary (piper/piper/piper) + a voice model
-under piper/voices/, and discord.py (discord_bot.py, a separate always-on
-process - see server/README.md). No accounts, no TLS - this is meant to
-sit on a trusted home LAN behind the router, with an optional
+under piper/voices/, discord.py (discord_bot.py, a separate always-on
+process - see server/README.md), and waifu2x-ncnn-vulkan (system package,
+see server/README.md) for /wallpaper-upscale. No accounts, no TLS - this
+is meant to sit on a trusted home LAN behind the router, with an optional
 shared-secret header (DASHBOARD_SERVER_KEY) as cheap insurance.
 
 The Ollama-backed endpoints (/insight, /trivia, /journal-reflection) run
@@ -65,12 +72,14 @@ generated once per day/request and not blocking anything tap-and-wait
 like TTS or the daily insight, which stay on the fast 1B model.
 """
 import hashlib
+import io
 import json
 import math
 import os
 import random
 import re
 import subprocess
+import tempfile
 import time
 import urllib.request
 import urllib.error
@@ -122,6 +131,12 @@ WALLPAPER_MAX_DIMENSION = 1600  # matches the dashboard's own WALLPAPER_MAX_DIME
 WALLPAPER_JPEG_QUALITY = 82
 for _d in (WALLPAPER_DIR, WALLPAPER_INBOX_DIR, WALLPAPER_PROCESSED_DIR):
     _d.mkdir(exist_ok=True)
+
+# waifu2x-ncnn-vulkan only supports these exact scale factors - see
+# upscale_wallpaper_image() for how one gets picked per image.
+WAIFU2X_BIN = "waifu2x-ncnn-vulkan"
+WAIFU2X_PHOTO_MODEL = Path("/usr/share/waifu2x-ncnn-vulkan/models-upconv_7_photo")
+WAIFU2X_SUPPORTED_SCALES = (1, 2, 4, 8, 16, 32)
 
 # ---------------------------------------------------------------------------
 # ISS pass prediction (skyfield, no planetary ephemeris needed - only a
@@ -794,6 +809,47 @@ def pick_random_wallpaper():
     return random.choice(files).read_bytes()
 
 
+def upscale_wallpaper_image(raw_bytes):
+    """Runs [raw_bytes] through waifu2x-ncnn-vulkan's photo model when it's
+    smaller than the dashboard actually displays at, then applies the exact
+    same cap/JPEG-encode tail as process_wallpaper_inbox() so the result is
+    indistinguishable in storage terms from a normal wallpaper import.
+    Already-large photos skip the GPU step entirely - upscaling something
+    that's about to be downscaled right back down would just burn time for
+    no visible difference."""
+    from PIL import Image, ImageOps
+
+    with Image.open(io.BytesIO(raw_bytes)) as img:
+        img = ImageOps.exif_transpose(img)
+        img = img.convert("RGB")
+        needed = WALLPAPER_MAX_DIMENSION / max(img.width, img.height)
+        scale = next((s for s in WAIFU2X_SUPPORTED_SCALES if s >= needed), WAIFU2X_SUPPORTED_SCALES[-1])
+
+        if scale <= 1:
+            out = img
+        else:
+            with tempfile.TemporaryDirectory() as tmp:
+                in_path = Path(tmp) / "in.png"
+                out_path = Path(tmp) / "out.png"
+                img.save(in_path, "PNG")  # a fresh PNG so waifu2x isn't enhancing on top of extra JPEG artifacts
+                proc = subprocess.run(
+                    [WAIFU2X_BIN, "-i", str(in_path), "-o", str(out_path), "-s", str(scale), "-m", str(WAIFU2X_PHOTO_MODEL)],
+                    capture_output=True,
+                    timeout=120,
+                )
+                if proc.returncode != 0:
+                    raise RuntimeError(proc.stderr.decode("utf-8", "replace"))
+                out = Image.open(out_path)
+                out.load()  # decode now - the temp dir (and out_path) is gone once this block exits
+
+        final_scale = min(1.0, WALLPAPER_MAX_DIMENSION / max(out.width, out.height))
+        if final_scale < 1.0:
+            out = out.resize((round(out.width * final_scale), round(out.height * final_scale)), Image.LANCZOS)
+        buf = io.BytesIO()
+        out.save(buf, "JPEG", quality=WALLPAPER_JPEG_QUALITY)
+        return buf.getvalue()
+
+
 # ---------------------------------------------------------------------------
 # TTS (Piper - offline neural TTS, far better quality than espeak-ng's
 # formant synthesis; still fully local, no cloud call)
@@ -875,6 +931,10 @@ class Handler(BaseHTTPRequestHandler):
             return {}
         raw = self.rfile.read(length)
         return json.loads(raw.decode("utf-8"))
+
+    def _read_raw_body(self):
+        length = int(self.headers.get("Content-Length", 0))
+        return self.rfile.read(length) if length else b""
 
     def do_OPTIONS(self):
         self.send_response(204)
@@ -1019,6 +1079,17 @@ class Handler(BaseHTTPRequestHandler):
                 payload = self._read_json_body()
                 text = generate_week_in_review(payload.get("sleepHistory"), payload.get("habitCompletionByDate"))
                 self._send_json(200, {"text": text})
+            except Exception as e:
+                self._send_json(502, {"error": str(e)})
+            return
+        if parsed.path == "/wallpaper-upscale":
+            try:
+                raw = self._read_raw_body()
+                if not raw:
+                    self._send_json(400, {"error": "image body required"})
+                    return
+                data = upscale_wallpaper_image(raw)
+                self._send_bytes(200, "image/jpeg", data)
             except Exception as e:
                 self._send_json(502, {"error": str(e)})
             return
