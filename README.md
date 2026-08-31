@@ -56,12 +56,12 @@ triple-beep that's easy to miss from another room.
   direct link to its setup instructions). Everything here can be changed
   again later in Settings; this just gets the dashboard usable on first
   boot without digging through Settings first.
-- **Nine swipeable pages** (CSS scroll-snap, real touch scrolling,
+- **Eleven swipeable pages** (CSS scroll-snap, real touch scrolling,
   tap-to-jump dot indicators): a Morning Overview, a Daily Info page, a
   Clock/Alarm/Sound Machine page, a Wake Alarms page, a Sleep Insights page,
-  a Habits page, a Settings page, a Timer/Stopwatch page, and a
-  Journal/Word Game/Trivia/Puzzle page (a fifth Ask tab joins these when a
-  Companion Server is configured). Bedside Mode, Ambient Mode, and
+  a Habits page, a Settings page, a Timer/Stopwatch page, a
+  Journal/Word Game/Trivia/Puzzle page, a Homelab Status page, and an Ask
+  the Dashboard page. Bedside Mode, Ambient Mode, and
   Breathing Mode are summoned full-screen overlays, not pages you swipe to.
 - **Weather, live from public APIs**: [Open-Meteo](https://open-meteo.com/)
   for current conditions, a 5-day forecast, sunrise/sunset, air quality,
@@ -373,11 +373,12 @@ unreachable — nothing on the dashboard depends on it existing.
   ever without any of this configured; it's purely optional icing for when
   you think of something to add to a list, or want to flag something
   urgent, while you're out.
-- **Ask the Dashboard**: a plain-text Q&A box on the Extras page's fifth
-  tab — type a quick question, the local model answers on-screen. Same
-  factual-accuracy caveat as Trivia (it's a small local model, and it's
-  told to hedge rather than guess when unsure) — a starting point, not an
-  authority.
+- **Ask the Dashboard**: its own page — type a quick question, get an
+  on-screen answer. Runs on the same larger model as Puzzle and
+  mood-to-soundscape (`qwen2.5:3b-instruct`) rather than the fast one used
+  for TTS text/the daily insight - noticeably more capable, and told to
+  answer plainly and directly rather than hedge on things it actually
+  knows. Still not fact-checked - a starting point, not an authority.
 - **Mood-to-soundscape**: describe a scene ("cozy rainy evening") in the
   Soundscape Mixer and the model picks which of the existing layers to
   blend and at what volumes, instead of manually tuning four sliders.

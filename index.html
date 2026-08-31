@@ -1025,7 +1025,6 @@
         <button class="settings-segment" type="button" data-mode="wordpuzzle">Word Game</button>
         <button class="settings-segment" type="button" data-mode="trivia">Trivia</button>
         <button class="settings-segment" type="button" data-mode="puzzle">Puzzle</button>
-        <button class="settings-segment hidden" type="button" data-mode="ask" id="extras-ask-segment">Ask</button>
       </div>
 
       <div class="journal-view" id="journal-view">
@@ -1090,19 +1089,6 @@
         <div class="puzzle-options" id="puzzle-options"></div>
         <div class="puzzle-feedback hidden" id="puzzle-feedback"></div>
       </div>
-
-      <div class="ask-view hidden" id="ask-view">
-        <h2 class="card-title">
-          <span class="icon-slot small" id="ask-title-icon" aria-hidden="true"></span>
-          Ask the Dashboard
-        </h2>
-        <div class="settings-text-hint">Quick questions, answered by a local model on your Companion Server - not fact-checked, treat it as a starting point.</div>
-        <div class="wordpuzzle-row">
-          <input type="text" id="ask-question-input" class="settings-text-input" placeholder="Ask something…" maxlength="200" autocomplete="off" aria-label="Question for the dashboard" />
-          <button class="alarm-action-btn" id="ask-submit-btn" type="button">Ask</button>
-        </div>
-        <div class="settings-text-hint hidden" id="ask-answer-text"></div>
-      </div>
     </section>
 
     <section class="page page-homelab" id="page-homelab" aria-label="Homelab Status">
@@ -1123,6 +1109,26 @@
         <div class="homelab-grid" id="homelab-services-grid"></div>
       </div>
     </section>
+
+    <!-- Page 10: Ask the Dashboard - free-text Q&A via the Companion
+         Server's local model (see generate_answer() in server.py).
+         Promoted out of the Extras segmented view into its own page since
+         it's a different kind of interaction (a deliberate "I have a
+         question" trip, not something you'd casually flip past like
+         Trivia/Puzzle). -->
+    <section class="page page-ask" id="page-ask" aria-label="Ask the Dashboard">
+      <h2 class="card-title">
+        <span class="icon-slot small" id="ask-title-icon" aria-hidden="true"></span>
+        Ask the Dashboard
+      </h2>
+      <div class="settings-text-hint hidden" id="ask-no-server-hint">Set up a Companion Server (Settings) to use this.</div>
+      <div class="settings-text-hint">Quick questions, answered by a local model on your Companion Server - not fact-checked, treat it as a starting point.</div>
+      <div class="wordpuzzle-row">
+        <input type="text" id="ask-question-input" class="settings-text-input" placeholder="Ask something…" maxlength="200" autocomplete="off" aria-label="Question for the dashboard" />
+        <button class="alarm-action-btn" id="ask-submit-btn" type="button">Ask</button>
+      </div>
+      <div class="settings-text-hint hidden" id="ask-answer-text"></div>
+    </section>
   </div>
 
   <nav class="page-dots" id="page-dots" aria-label="Dashboard pages">
@@ -1136,6 +1142,7 @@
     <button class="page-dot" data-page="7" aria-label="Timer and Stopwatch"></button>
     <button class="page-dot" data-page="8" aria-label="Journal and Word Game"></button>
     <button class="page-dot" data-page="9" aria-label="Homelab Status"></button>
+    <button class="page-dot" data-page="10" aria-label="Ask the Dashboard"></button>
   </nav>
 
   <!-- Week-ahead glance and Agenda editor, opened from the Agenda card's

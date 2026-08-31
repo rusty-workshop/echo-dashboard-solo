@@ -9452,7 +9452,6 @@ function setupExtrasPage() {
   setupWordPuzzle();
   setupDailyTrivia();
   setupDailyPuzzle();
-  setupAskExtras();
 
   const segmented = byId("extras-mode-segmented");
   segmented?.addEventListener("click", (event) => {
@@ -9463,15 +9462,16 @@ function setupExtrasPage() {
     byId("wordpuzzle-view")?.classList.toggle("hidden", btn.dataset.mode !== "wordpuzzle");
     byId("trivia-view")?.classList.toggle("hidden", btn.dataset.mode !== "trivia");
     byId("puzzle-view")?.classList.toggle("hidden", btn.dataset.mode !== "puzzle");
-    byId("ask-view")?.classList.toggle("hidden", btn.dataset.mode !== "ask");
   });
 }
 
 // ---------------------------------------------------------------------------
 // Ask the Dashboard - free-text Q&A via the Companion Server's local model
-// (see generate_answer() in server.py). The one open-ended feature among
-// Extras' generated content - no caching, no daily limit, just a plain
-// question/answer exchange each time it's tapped.
+// (see generate_answer() in server.py). Its own page rather than a tab
+// inside Extras - a deliberate "I have a question" trip is a different
+// kind of interaction from the casual, flip-past-it Trivia/Puzzle/Word
+// Game tabs it used to share space with. No caching, no daily limit, just
+// a plain question/answer exchange each time it's tapped.
 // ---------------------------------------------------------------------------
 async function submitAskQuestion() {
   const input = byId("ask-question-input");
@@ -9490,7 +9490,7 @@ async function submitAskQuestion() {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ question }),
-    timeoutMs: 30000,
+    timeoutMs: 50000, // Ask runs on the larger/slower model - see generate_answer() in server.py
   });
   if (btn) btn.disabled = false;
   if (!resp) {
@@ -9501,10 +9501,15 @@ async function submitAskQuestion() {
   if (answerEl) answerEl.textContent = data.text || "No answer came back.";
 }
 
-function setupAskExtras() {
-  if (!companionServerConfig()) return; // segment stays hidden - no server, no Q&A
+/** Same "empty-state hint instead of a hidden control" pattern as Homelab
+ *  Status - this is a real page you can always swipe to, unlike the old
+ *  Extras tab which stayed hidden entirely without a server configured. */
+function setupAskPage() {
   setIcon("ask-title-icon", "sparkle");
-  byId("extras-ask-segment")?.classList.remove("hidden");
+  const hasServer = !!companionServerConfig();
+  byId("ask-no-server-hint")?.classList.toggle("hidden", hasServer);
+  byId("ask-question-input").disabled = !hasServer;
+  byId("ask-submit-btn").disabled = !hasServer;
   byId("ask-submit-btn")?.addEventListener("click", submitAskQuestion);
   byId("ask-question-input")?.addEventListener("keydown", (event) => {
     if (event.key === "Enter") submitAskQuestion();
@@ -9821,6 +9826,7 @@ function init() {
   setupHeartbeat();
   setupHomelabDashboardSettings();
   setupHomelabStatusPage();
+  setupAskPage();
   setupDiscordInboxPolling();
   setupBackupSettings();
   loadTodayInHistory();

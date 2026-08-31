@@ -554,10 +554,20 @@ def generate_answer(question):
         raise ValueError("no question provided")
     prompt = (
         "Answer this question concisely (2-4 sentences), in plain text with no "
-        "markdown formatting. If you aren't confident of the answer, say so briefly "
-        f"rather than guessing.\n\nQuestion: {question.strip()}\n\nAnswer:"
+        "markdown formatting. Answer plainly and directly when you actually know "
+        "the answer - don't hedge on things you're sure of (arithmetic, well-known "
+        "facts). Only flag uncertainty when you're genuinely not sure.\n\n"
+        f"Question: {question.strip()}\n\nAnswer:"
     )
-    text = call_ollama(prompt, num_predict=200, temperature=0.5, timeout=30)
+    # The fast 1B model used elsewhere (TTS text, the daily insight) was
+    # noticeably weak here - both less accurate on anything past trivial
+    # questions and prone to reflexive hedging even on things it clearly
+    # knew (e.g. "1+1", answered correctly but wrapped in unnecessary
+    # uncertainty). Ask is the one place someone's directly judging the
+    # model's competence in the moment, unlike the more ambient generated
+    # text elsewhere, so it's worth the extra latency of the larger model
+    # already used for Puzzle/soundscape-mood.
+    text = call_ollama(prompt, num_predict=200, temperature=0.3, model=OLLAMA_STRONG_MODEL, timeout=45)
     text = text.strip()
     if not text:
         raise ValueError("empty answer")
