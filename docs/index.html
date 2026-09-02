@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>echo-dashboard-solo — a phone-free bedside display</title>
+<meta name="description" content="A phone-free bedside display for a repurposed Amazon Echo Show 5. No cloud, no subscription, no phone required. Weather, sleep tools, journal, habits, and more — all local.">
+<style>
+  :root{
+    --bg-0:#120e18;
+    --bg-1:#1a1420;
+    --bg-2:#211a29;
+    --card:#241d2c;
+    --card-border:#3a2f45;
+    --text-0:#f3ead9;
+    --text-1:#cfc2d8;
+    --text-2:#a196ad;
+    --amber:#f2b866;
+    --amber-soft:#f2b86633;
+    --amber-glow:#ffd8a3;
+    --moon:#fff6e0;
+    --radius:18px;
+    --serif: "Iowan Old Style", "Palatino Linotype", Georgia, "Noto Serif", serif;
+    --rounded: ui-rounded, "Segoe UI Rounded", "SF Pro Rounded", "Nunito", system-ui, sans-serif;
+  }
+
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0;
+    background:
+      radial-gradient(ellipse 800px 500px at 50% -10%, #3a2c4a55, transparent 60%),
+      linear-gradient(180deg, var(--bg-0), var(--bg-1) 40%, var(--bg-2));
+    color:var(--text-1);
+    font-family:var(--rounded);
+    line-height:1.6;
+    overflow-x:hidden;
+    position:relative;
+  }
+
+  /* sparse twinkling starfield, fixed behind everything */
+  .stars{
+    position:fixed;
+    inset:0;
+    z-index:0;
+    pointer-events:none;
+    overflow:hidden;
+  }
+  .stars span{
+    position:absolute;
+    width:2px;
+    height:2px;
+    border-radius:50%;
+    background:var(--moon);
+    opacity:.5;
+    animation:twinkle 5s ease-in-out infinite;
+  }
+  @keyframes twinkle{
+    0%,100%{opacity:.15; transform:scale(1);}
+    50%{opacity:.9; transform:scale(1.6);}
+  }
+
+  main, header, footer{position:relative; z-index:1;}
+
+  a{color:var(--amber);}
+
+  .wrap{
+    max-width:920px;
+    margin:0 auto;
+    padding:0 24px;
+  }
+
+  /* ---------- HERO ---------- */
+  .hero{
+    padding:96px 0 72px;
+    text-align:center;
+    position:relative;
+  }
+  .hero::before{
+    content:"";
+    position:absolute;
+    top:-120px; left:50%;
+    transform:translateX(-50%);
+    width:900px; height:700px;
+    background:radial-gradient(circle at 50% 30%, #f2b86633, transparent 65%);
+    z-index:-1;
+    pointer-events:none;
+  }
+  .eyebrow{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    font-size:13px;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    color:var(--amber);
+    background:var(--amber-soft);
+    border:1px solid #f2b86655;
+    padding:6px 14px;
+    border-radius:999px;
+    margin-bottom:28px;
+  }
+  h1{
+    font-family:var(--serif);
+    font-weight:600;
+    font-size:clamp(2.2rem, 5vw, 3.4rem);
+    color:var(--text-0);
+    margin:0 0 18px;
+    letter-spacing:-.01em;
+  }
+  h1 .accent{color:var(--amber);}
+  .pitch{
+    font-size:clamp(1.05rem, 2vw, 1.25rem);
+    color:var(--text-1);
+    max-width:600px;
+    margin:0 auto 40px;
+  }
+  .cta-row{
+    display:flex;
+    justify-content:center;
+    gap:14px;
+    flex-wrap:wrap;
+    margin-bottom:64px;
+  }
+  .btn{
+    display:inline-flex;
+    align-items:center;
+    gap:8px;
+    padding:13px 26px;
+    border-radius:14px;
+    font-family:var(--rounded);
+    font-weight:600;
+    font-size:15px;
+    text-decoration:none;
+    transition:transform .15s ease, box-shadow .15s ease;
+  }
+  .btn-primary{
+    background:linear-gradient(180deg, var(--amber-glow), var(--amber));
+    color:#241a08;
+    box-shadow:0 8px 24px -8px #f2b86688;
+  }
+  .btn-primary:hover{transform:translateY(-2px); box-shadow:0 12px 28px -8px #f2b866aa;}
+  .btn-ghost{
+    background:transparent;
+    color:var(--text-1);
+    border:1px solid var(--card-border);
+  }
+  .btn-ghost:hover{border-color:var(--amber); color:var(--amber);}
+
+  /* ---------- CLOCK MOCKUP ---------- */
+  .device{
+    max-width:520px;
+    margin:0 auto;
+    border-radius:34px;
+    padding:14px;
+    background:linear-gradient(160deg, #2b2233, #1a1420);
+    border:1px solid var(--card-border);
+    box-shadow:0 30px 70px -20px #00000090, inset 0 1px 0 #ffffff0d;
+  }
+  .device-screen{
+    border-radius:22px;
+    background:radial-gradient(ellipse at 50% 35%, #2c2138, #100c16 75%);
+    padding:44px 20px 34px;
+    text-align:center;
+    position:relative;
+    overflow:hidden;
+  }
+  .device-screen::before{
+    content:"";
+    position:absolute;
+    top:10%; left:50%;
+    transform:translateX(-50%);
+    width:260px; height:260px;
+    background:radial-gradient(circle, #ffe9bf3d, transparent 70%);
+    pointer-events:none;
+  }
+  .moonlet{
+    width:34px; height:34px;
+    margin:0 auto 18px;
+    border-radius:50%;
+    background:radial-gradient(circle at 35% 35%, var(--moon), #d9c48a);
+    box-shadow:0 0 24px 4px #ffd8a366;
+    position:relative;
+  }
+  .big-time{
+    font-family:var(--serif);
+    font-size:clamp(3rem, 11vw, 4.6rem);
+    color:var(--moon);
+    font-weight:600;
+    letter-spacing:.01em;
+    text-shadow:0 0 30px #ffd8a355;
+    margin-bottom:6px;
+  }
+  .date-line{
+    color:var(--text-2);
+    font-size:14px;
+    letter-spacing:.04em;
+    margin-bottom:22px;
+  }
+  .weather-line{
+    display:inline-flex;
+    align-items:center;
+    gap:10px;
+    font-size:15px;
+    color:var(--text-1);
+    background:#00000030;
+    border:1px solid #ffffff14;
+    padding:8px 18px;
+    border-radius:999px;
+  }
+  .weather-line b{color:var(--amber-glow); font-weight:600;}
+
+  /* ---------- SECTIONS ---------- */
+  section{padding:64px 0;}
+  .section-head{
+    text-align:center;
+    max-width:640px;
+    margin:0 auto 48px;
+  }
+  .section-head .kicker{
+    font-size:13px;
+    letter-spacing:.12em;
+    text-transform:uppercase;
+    color:var(--amber);
+    margin-bottom:10px;
+  }
+  .section-head h2{
+    font-family:var(--serif);
+    font-size:clamp(1.6rem, 3vw, 2.1rem);
+    color:var(--text-0);
+    margin:0 0 12px;
+  }
+  .section-head p{color:var(--text-2); margin:0;}
+
+  .why{
+    text-align:center;
+    max-width:680px;
+    margin:0 auto;
+  }
+  .why h2{
+    font-family:var(--serif);
+    color:var(--text-0);
+    font-size:clamp(1.5rem, 3vw, 2rem);
+    margin-bottom:16px;
+  }
+  .why p{color:var(--text-1); font-size:1.05rem;}
+
+  .feature-groups{
+    display:grid;
+    grid-template-columns:repeat(auto-fit, minmax(260px, 1fr));
+    gap:22px;
+  }
+  .fgroup{
+    background:var(--card);
+    border:1px solid var(--card-border);
+    border-radius:var(--radius);
+    padding:26px 24px;
+  }
+  .fgroup .ficon{
+    width:40px; height:40px;
+    border-radius:12px;
+    display:flex; align-items:center; justify-content:center;
+    background:var(--amber-soft);
+    margin-bottom:14px;
+  }
+  .fgroup .ficon svg{width:20px; height:20px;}
+  .fgroup h3{
+    font-family:var(--serif);
+    color:var(--text-0);
+    font-size:1.15rem;
+    margin:0 0 10px;
+  }
+  .fgroup ul{
+    margin:0; padding:0;
+    list-style:none;
+  }
+  .fgroup li{
+    color:var(--text-2);
+    font-size:14.5px;
+    padding:5px 0 5px 20px;
+    position:relative;
+  }
+  .fgroup li::before{
+    content:"✦";
+    position:absolute;
+    left:0; top:5px;
+    color:var(--amber);
+    font-size:12px;
+  }
+  .fgroup li b{color:var(--text-1); font-weight:600;}
+
+  .fork-note{
+    text-align:center;
+    color:var(--text-2);
+    font-size:14px;
+    max-width:560px;
+    margin:56px auto 0;
+    padding-top:28px;
+    border-top:1px solid var(--card-border);
+  }
+  .fork-note a{color:var(--amber);}
+
+  footer{
+    padding:48px 0 60px;
+    text-align:center;
+    border-top:1px solid var(--card-border);
+    color:var(--text-2);
+    font-size:13.5px;
+  }
+  footer .foot-links{
+    display:flex;
+    justify-content:center;
+    gap:20px;
+    margin-bottom:16px;
+    flex-wrap:wrap;
+  }
+  footer a{color:var(--text-1); text-decoration:none;}
+  footer a:hover{color:var(--amber);}
+
+  @media (max-width:600px){
+    .hero{padding:64px 0 48px;}
+    section{padding:48px 0;}
+  }
+</style>
+</head>
+<body>
+
+<div class="stars" id="stars" aria-hidden="true"></div>
+
+<main>
+  <div class="wrap">
+    <section class="hero">
+      <span class="eyebrow">✦ built for a repurposed Echo Show 5</span>
+      <h1>echo<span class="accent">-</span>dashboard<span class="accent">-solo</span></h1>
+      <p class="pitch">A phone-free bedside display for an old Echo Show — no cloud, no subscription, no phone required.</p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="https://github.com/rustyisacat/echo-dashboard-solo" target="_blank" rel="noopener">
+          View on GitHub
+        </a>
+        <a class="btn btn-ghost" href="#features">See features</a>
+      </div>
+
+      <div class="device" aria-hidden="true">
+        <div class="device-screen">
+          <div class="moonlet"></div>
+          <div class="big-time">10:47</div>
+          <div class="date-line">Tuesday, September 1</div>
+          <div class="weather-line">☁️ &nbsp;<b>68°F</b> &nbsp;·&nbsp; feels like 66° &nbsp;·&nbsp; H 74° L 59°</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="why">
+      <h2>Why phone-free</h2>
+      <p>
+        The original dashboard leaned on a phone nearby for weather and context — fine, until the phone
+        was dead, silenced, or in another room. This fork fetches its own weather, keeps its own journal,
+        tracks its own habits, and rings its own alarms. The screen works standalone and is always
+        available, whether or not anything else in the house is charged, connected, or awake.
+      </p>
+    </section>
+
+    <section id="features">
+      <div class="section-head">
+        <div class="kicker">What's on the screen</div>
+        <h2>Everything it needs, nothing it doesn't</h2>
+        <p>Plain HTML, CSS, and JavaScript. No build step, no framework, no third-party server.</p>
+      </div>
+
+      <div class="feature-groups">
+
+        <div class="fgroup">
+          <div class="ficon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#f2b866" stroke-width="1.6"><path d="M6 15a4 4 0 010-8 5 5 0 019.6-1.5A4.5 4.5 0 0118 15H6z"/><path d="M8 19h.01M12 19h.01M16 19h.01"/></svg>
+          </div>
+          <h3>Weather &amp; Sky</h3>
+          <ul>
+            <li><b>Live weather</b> straight from Open-Meteo — current temp, condition, high/low</li>
+            <li>Feels-like, wind, humidity, UV index</li>
+            <li>Sunrise &amp; sunset, 5-day forecast</li>
+            <li>Live NWS radar image</li>
+            <li>US EPA Air Quality Index</li>
+            <li>NWS severe weather alerts</li>
+            <li><b>Night Sky View</b> — real star map, ~40 brightest stars, connect-the-dots constellations, planets and moon phase, computed fully offline</li>
+          </ul>
+        </div>
+
+        <div class="fgroup">
+          <div class="ficon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#f2b866" stroke-width="1.6"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg>
+          </div>
+          <h3>Sleep &amp; Bedside</h3>
+          <ul>
+            <li><b>Bedside Mode</b> — one-tap full-screen dimmed view, rain sound, huge clock, disables until dismissed</li>
+            <li><b>Ambient Mode</b> — idle-timeout screensaver, huge clock, photo crossfade, starfield fallback</li>
+            <li><b>Sound Machine</b> — built-in ambient sounds plus your own imports, gapless looping</li>
+            <li><b>Wake Alarms</b> — ring entirely client-side, volume ramps from ~8% to full over 45 seconds</li>
+            <li><b>Sleep Insights</b> — Bedside session tracking, 7-day bar chart, 30-day sparkline, weekly average, night streak</li>
+            <li><b>Bedtime &amp; Good Morning Briefings</b> — spoken recap via browser text-to-speech</li>
+          </ul>
+        </div>
+
+        <div class="fgroup">
+          <div class="ficon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#f2b866" stroke-width="1.6"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+          </div>
+          <h3>Daily Tools</h3>
+          <ul>
+            <li><b>Journal</b> — private diary entries, optional password lock</li>
+            <li><b>Habits</b> — daily checklist with streak counts</li>
+            <li><b>Reminders</b> — repeating-interval nudges</li>
+            <li><b>Night Routine</b> — nightly checklist that resets itself</li>
+            <li><b>Countdown</b> — days-until-date, optional yearly repeat</li>
+            <li><b>World Clock</b> — add cities you care about</li>
+          </ul>
+        </div>
+
+        <div class="fgroup">
+          <div class="ficon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#f2b866" stroke-width="1.6"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h8M8 11h8M8 15h4"/></svg>
+          </div>
+          <h3>Utilities &amp; Extras</h3>
+          <ul>
+            <li><b>Calculator</b> and unit <b>Converter</b></li>
+            <li><b>Word Game</b> for idle moments</li>
+            <li><b>Custom Sounds</b> — import your own audio via Storage Access Framework, usable in both the Sound Machine and Wake Alarms</li>
+          </ul>
+        </div>
+
+        <div class="fgroup">
+          <div class="ficon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#f2b866" stroke-width="1.6"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg>
+          </div>
+          <h3>Personalization</h3>
+          <ul>
+            <li><b>8 full CSS theme reskins</b> to match your mood or room</li>
+            <li>Wallpaper rotation with dominant-color-driven accent</li>
+            <li>Runs entirely offline once loaded — no account, no cloud, no subscription</li>
+          </ul>
+        </div>
+
+      </div>
+
+      <p class="fork-note">
+        A phone-free fork of the original <b>Aurora + echo-dashboard</b> project, which pairs the display
+        with a companion phone app. This is the standalone variant, currently running on a real
+        repurposed Echo Show 5 beside the bed.
+      </p>
+    </section>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-links">
+      <a href="https://github.com/rustyisacat/echo-dashboard-solo" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/rustyisacat/echo-dashboard-solo/blob/main/LICENSE" target="_blank" rel="noopener">License</a>
+      <a href="https://github.com/rustyisacat/echo-dashboard-solo/issues" target="_blank" rel="noopener">Issues</a>
+    </div>
+    <div>echo-dashboard-solo · Licensed under AGPL-3.0-or-later</div>
+  </div>
+</footer>
+
+<script>
+  (function(){
+    var field = document.getElementById('stars');
+    var n = 60;
+    var frag = document.createDocumentFragment();
+    for(var i=0;i<n;i++){
+      var s = document.createElement('span');
+      s.style.left = (Math.random()*100)+'vw';
+      s.style.top = (Math.random()*100)+'vh';
+      s.style.animationDelay = (Math.random()*5)+'s';
+      s.style.animationDuration = (3.5+Math.random()*4)+'s';
+      var size = Math.random() < 0.15 ? 3 : (Math.random() < 0.5 ? 1 : 2);
+      s.style.width = size+'px';
+      s.style.height = size+'px';
+      frag.appendChild(s);
+    }
+    field.appendChild(frag);
+
+    // subtle live-updating mock clock in hero
+    var timeEl = document.querySelector('.big-time');
+    var dateEl = document.querySelector('.date-line');
+    function tick(){
+      var d = new Date();
+      var h = d.getHours() % 12 || 12;
+      var m = ('0'+d.getMinutes()).slice(-2);
+      timeEl.textContent = h+':'+m;
+      dateEl.textContent = d.toLocaleDateString(undefined, {weekday:'long', month:'long', day:'numeric'});
+    }
+    tick();
+    setInterval(tick, 15000);
+  })();
+</script>
+
+</body>
+</html>
