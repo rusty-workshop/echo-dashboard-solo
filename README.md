@@ -5,7 +5,9 @@
 ![No backend](https://img.shields.io/badge/backend-none-success)
 ![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)
 
-A standalone fork of [**echo-dashboard**](https://github.com/rustyisacat/echo-dashboard)
+🌐 **[Live site](https://echo-dashboard-solo.rusty.is-a.dev/)**
+
+A standalone fork of [**echo-dashboard**](https://github.com/rusty-workshop/echo-dashboard)
 with every phone-dependent feature removed — there's no companion app to
 pair with at all. Vanilla HTML/CSS/JS, no framework, no bundler, no
 backend of its own either: weather comes straight from public APIs, and
@@ -436,7 +438,7 @@ No build tools, no package manager, no dependencies, no backend: just
 1. **Clone the repo:**
 
    ```
-   git clone https://github.com/rustyisacat/echo-dashboard-solo.git
+   git clone https://github.com/rusty-workshop/echo-dashboard-solo.git
    cd echo-dashboard-solo
    ```
 
