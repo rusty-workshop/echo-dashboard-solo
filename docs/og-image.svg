@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a1420"/>
+      <stop offset="45%" stop-color="#1a1420"/>
+      <stop offset="100%" stop-color="#211a29"/>
+    </linearGradient>
+    <radialGradient id="topGlow" cx="50%" cy="0%" r="70%">
+      <stop offset="0%" stop-color="#3a2c4a" stop-opacity=".55"/>
+      <stop offset="100%" stop-color="#3a2c4a" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="deviceGlow" cx="50%" cy="35%" r="55%">
+      <stop offset="0%" stop-color="#ffe9bf" stop-opacity=".3"/>
+      <stop offset="100%" stop-color="#ffe9bf" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="deviceBody" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2b2233"/>
+      <stop offset="100%" stop-color="#1a1420"/>
+    </linearGradient>
+    <radialGradient id="deviceScreen" cx="50%" cy="30%" r="80%">
+      <stop offset="0%" stop-color="#2c2138"/>
+      <stop offset="100%" stop-color="#100c16"/>
+    </radialGradient>
+    <radialGradient id="moon" cx="35%" cy="35%" r="70%">
+      <stop offset="0%" stop-color="#fff6e0"/>
+      <stop offset="100%" stop-color="#d9c48a"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect width="1200" height="630" fill="url(#topGlow)"/>
+
+  <!-- scattered stars -->
+  <g fill="#fff6e0">
+    <circle cx="90" cy="80" r="2" opacity=".7"/>
+    <circle cx="160" cy="160" r="1.4" opacity=".5"/>
+    <circle cx="60" cy="230" r="1.6" opacity=".6"/>
+    <circle cx="150" cy="320" r="2" opacity=".5"/>
+    <circle cx="1120" cy="90" r="2" opacity=".7"/>
+    <circle cx="1050" cy="170" r="1.4" opacity=".5"/>
+    <circle cx="1140" cy="250" r="1.8" opacity=".6"/>
+    <circle cx="1060" cy="330" r="1.4" opacity=".5"/>
+    <circle cx="1000" cy="60" r="1.6" opacity=".6"/>
+    <circle cx="200" cy="70" r="1.4" opacity=".5"/>
+  </g>
+
+  <!-- eyebrow pill -->
+  <rect x="424" y="72" width="352" height="34" rx="17" fill="#f2b86633" stroke="#f2b86655"/>
+  <text x="600" y="94" text-anchor="middle" font-family="Nunito, 'Segoe UI', sans-serif" font-weight="700" font-size="13" letter-spacing="1.6" fill="#f2b866">FOR A REPURPOSED ECHO SHOW 5</text>
+
+  <!-- title -->
+  <text x="600" y="168" text-anchor="middle" font-family="Georgia, 'Iowan Old Style', serif" font-weight="600" font-size="54" fill="#f3ead9">echo<tspan fill="#f2b866">-</tspan>dashboard<tspan fill="#f2b866">-solo</tspan></text>
+  <text x="600" y="206" text-anchor="middle" font-family="Nunito, 'Segoe UI', sans-serif" font-size="21" fill="#cfc2d8">A phone-free bedside display, no cloud, no subscription, no phone required.</text>
+
+  <!-- device mockup -->
+  <g transform="translate(600,415)">
+    <circle cx="0" cy="-10" r="180" fill="url(#deviceGlow)"/>
+    <rect x="-230" y="-125" width="460" height="230" rx="30" fill="url(#deviceBody)" stroke="#3a2f45" stroke-width="2"/>
+    <rect x="-208" y="-104" width="416" height="188" rx="20" fill="url(#deviceScreen)"/>
+
+    <circle cx="0" cy="-42" r="22" fill="url(#moon)"/>
+    <circle cx="7" cy="-49" r="18" fill="#100c16" opacity=".92"/>
+
+    <text x="0" y="18" text-anchor="middle" font-family="Georgia, 'Iowan Old Style', serif" font-weight="600" font-size="56" fill="#fff6e0">10:47</text>
+    <text x="0" y="46" text-anchor="middle" font-family="Nunito, 'Segoe UI', sans-serif" font-size="14" letter-spacing="1" fill="#a196ad">TUESDAY, SEPTEMBER 1</text>
+
+    <rect x="-108" y="58" width="216" height="30" rx="15" fill="#00000030" stroke="#ffffff14"/>
+    <text x="0" y="78" text-anchor="middle" font-family="Nunito, 'Segoe UI', sans-serif" font-size="14" fill="#cfc2d8">68°F · feels like 66° · H 74° L 59°</text>
+  </g>
+</svg>
