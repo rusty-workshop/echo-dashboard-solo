@@ -3041,7 +3041,9 @@ function buildBedtimeBriefingText() {
 
   const nextAlarm = nextWakeAlarmOccurrence();
   if (nextAlarm) {
-    sentences.push(`Your alarm is set for ${formatTimeOfDay(nextAlarm.hhmm)}.`);
+    const alarmIsToday = localDateKey(new Date(nextAlarm.epochMs)) === localDateKey(new Date());
+    const alarmDayPrefix = alarmIsToday ? "" : `${HABIT_WEEKDAY_NAMES[new Date(nextAlarm.epochMs).getDay()]} at `;
+    sentences.push(`Your alarm is set for ${alarmDayPrefix}${formatTimeOfDay(nextAlarm.hhmm)}.`);
   }
 
   if (sentences.length === 0) return "Good night. Sleep well.";
@@ -3136,7 +3138,7 @@ function setupMorningBriefing() {
  *  duplicating "next alarm" two different ways. */
 function renderNextWakeAlarmInline() {
   const next = nextWakeAlarmOccurrence();
-  const text = next ? formatTimeOfDay(next.hhmm) : "No alarm";
+  const text = nextAlarmDisplayText(next);
 
   setIcon("alarm-title-icon", "alarm");
   setText("alarm-time", text);
@@ -5380,6 +5382,21 @@ function nextWakeAlarmOccurrence() {
 }
 
 const DAY_ABBREVIATIONS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]; // index 0 = Calendar.SUNDAY(1)
+
+/** Bare time when the next alarm rings today (unchanged from before this
+ *  existed), day-prefixed ("Thu 5:00 AM") when it doesn't - a repeating
+ *  alarm whose only selected day already passed this week, or a one-time
+ *  alarm that rolled to tomorrow, would otherwise read as if it were still
+ *  today's alarm. Shared by the Next Alarm card, Bedside Mode, and the
+ *  Bedtime Briefing's own alarm sentence - one place computing this so
+ *  they can't drift out of sync with each other. */
+function nextAlarmDisplayText(next) {
+  if (!next) return "No alarm";
+  const time = formatTimeOfDay(next.hhmm);
+  if (localDateKey(new Date(next.epochMs)) === localDateKey(new Date())) return time;
+  const dayAbbrev = DAY_ABBREVIATIONS[new Date(next.epochMs).getDay()];
+  return `${dayAbbrev} ${time}`;
+}
 
 let selectedWakeAlarmDays = new Set(); // Calendar.DAY_OF_WEEK values (1-7)
 
